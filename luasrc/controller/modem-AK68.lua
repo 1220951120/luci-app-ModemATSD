@@ -24,7 +24,7 @@ function index()
 	end
 	entry({"admin", "modem-AK68", "Smstrun"}, template("zmode-AK68/settings"), _("短信转发"), 94).dependent = true
 	entry({"admin", "modem-AK68", "smsc"}, template("zmode-AK68/smsc-AK68"), _("设备短信"), 95)
-	entry({"admin", "modem-AK68", "nets"}, template(template_name), _("模组状态"), 97)
+	entry({"admin", "modem-AK68", "nets"}, call("action_nets"), _("模组状态"), 97)
 	entry({"admin", "modem-AK68", "traffic"}, template("zmode-AK68/traffic-AK68"), _("流量统计"), 96)
 	entry({"admin", "modem-AK68", "modem"}, cbi(modem_cbi), _("模组设置"), 98) 
 	entry({"admin", "modem-AK68", "backup"}, call("action_atsd_backup"), _("备份与恢复"), 99)
@@ -42,6 +42,19 @@ function index()
     entry({"admin", "modem-AK68", "Smstrun", "set_title"}, call("set_title"), nil).leaf = true
     entry({"admin", "modem-AK68", "Smstrun", "check_status"}, call("check_status"), nil).leaf = true
     entry({"admin", "modem-AK68", "Smstrun", "redhis"}, call("redhis"), nil).leaf = true
+end
+
+function action_nets()
+    local template = require "luci.template"
+    local content = fs.readfile("/tmp/modconf-AK68.conf") or ""
+
+    if content:find("RM520", 1, true) then
+        template.render("zmode-AK68/net_status_RM520-AK68")
+    elseif content:find("MT5700", 1, true) then
+        template.render("zmode-AK68/net_status_MT5700-AK68")
+    else
+        template.render("zmode-AK68/net_status-AK68")
+    end
 end
 
 local function is_mt5700()
