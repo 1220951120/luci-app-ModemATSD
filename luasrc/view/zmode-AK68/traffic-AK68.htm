@@ -1,0 +1,183 @@
+<%+header%>
+
+<style>
+.atsd-traffic-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; margin:16px 0; }
+.atsd-traffic-card { padding:16px; border:1px solid rgba(127,127,127,.25); border-radius:8px; background:rgba(127,127,127,.08); color:inherit; box-shadow:0 1px 4px rgba(0,0,0,.12); }
+.atsd-traffic-label { color:inherit; opacity:.72; font-size:13px; }
+.atsd-traffic-value { margin-top:8px; font-size:22px; font-weight:600; word-break:break-all; }
+.atsd-traffic-note { color:inherit; opacity:.72; margin:10px 0; }
+.atsd-traffic-error { color:#c00; min-height:20px; }
+.atsd-traffic-form { padding:16px; margin-top:18px; border:1px solid rgba(127,127,127,.25); border-radius:8px; background:rgba(127,127,127,.08); color:inherit; box-shadow:0 1px 4px rgba(0,0,0,.12); }
+.atsd-traffic-row { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:12px 0; }
+.atsd-traffic-row label { min-width:150px; }
+.atsd-traffic-row input[type="number"] { width:150px; }
+.atsd-traffic-row input[type="checkbox"] {
+    appearance:none !important;
+    -webkit-appearance:none !important;
+    width:18px !important;
+    height:18px !important;
+    margin:0 !important;
+    padding:0 !important;
+    border:2px solid currentColor !important;
+    border-radius:3px;
+    background-color:rgba(127,127,127,.12) !important;
+    background-image:none !important;
+    cursor:pointer;
+    position:relative;
+    flex:0 0 18px;
+}
+.atsd-traffic-row input[type="checkbox"]:checked {
+    border-color:var(--primary, #1677ff) !important;
+    background-color:var(--primary, #1677ff) !important;
+}
+.atsd-traffic-row input[type="checkbox"]:checked::after {
+    content:"";
+    position:absolute;
+    left:4px;
+    top:0;
+    width:5px;
+    height:10px;
+    border:solid #fff;
+    border-width:0 2px 2px 0;
+    transform:rotate(45deg);
+}
+.atsd-traffic-row input[type="checkbox"]:focus-visible {
+    outline:2px solid var(--primary, #1677ff);
+    outline-offset:2px;
+}
+.atsd-blocked { color:#c00; }
+</style>
+
+<h2><%:模组流量统计%></h2>
+<p class="atsd-traffic-note"><%:月度流量由后台服务持续累计，页面每 5 秒更新一次。发送和接收流量都会计入已用流量。%></p>
+
+<div class="atsd-traffic-grid">
+    <div class="atsd-traffic-card"><div class="atsd-traffic-label"><%:当前上传速度%></div><div id="speed_tx" class="atsd-traffic-value">--</div></div>
+    <div class="atsd-traffic-card"><div class="atsd-traffic-label"><%:当前下载速度%></div><div id="speed_rx" class="atsd-traffic-value">--</div></div>
+    <div class="atsd-traffic-card"><div class="atsd-traffic-label"><%:本月已用流量%></div><div id="monthly_used" class="atsd-traffic-value">--</div></div>
+    <div class="atsd-traffic-card"><div class="atsd-traffic-label"><%:本月剩余流量%></div><div id="monthly_remaining" class="atsd-traffic-value">--</div></div>
+    <div class="atsd-traffic-card"><div class="atsd-traffic-label"><%:流量限额%></div><div id="monthly_limit" class="atsd-traffic-value">--</div></div>
+    <div class="atsd-traffic-card"><div class="atsd-traffic-label"><%:网络状态%></div><div id="limit_status" class="atsd-traffic-value">--</div></div>
+    <div class="atsd-traffic-card"><div class="atsd-traffic-label"><%:本次发送流量%></div><div id="last_tx" class="atsd-traffic-value">--</div></div>
+    <div class="atsd-traffic-card"><div class="atsd-traffic-label"><%:本次接收流量%></div><div id="last_rx" class="atsd-traffic-value">--</div></div>
+    <div class="atsd-traffic-card"><div class="atsd-traffic-label"><%:累计发送流量%></div><div id="total_tx" class="atsd-traffic-value">--</div></div>
+    <div class="atsd-traffic-card"><div class="atsd-traffic-label"><%:累计接收流量%></div><div id="total_rx" class="atsd-traffic-value">--</div></div>
+    <div class="atsd-traffic-card"><div class="atsd-traffic-label"><%:本次连接时长%></div><div id="last_time" class="atsd-traffic-value">--</div></div>
+    <div class="atsd-traffic-card"><div class="atsd-traffic-label"><%:累计连接时长%></div><div id="total_time" class="atsd-traffic-value">--</div></div>
+</div>
+
+<div id="traffic_error" class="atsd-traffic-error"></div>
+
+<div class="atsd-traffic-form">
+    <h3><%:每月流量限额%></h3>
+    <div class="atsd-traffic-row">
+        <label for="limit_enabled"><%:到达限额自动断网%></label>
+        <input id="limit_enabled" type="checkbox" />
+    </div>
+    <div class="atsd-traffic-row">
+        <label for="limit_gb"><%:每月流量上限%></label>
+        <input id="limit_gb" type="number" min="0.01" step="0.01" /> <span>GB</span>
+    </div>
+    <div class="atsd-traffic-row">
+        <label for="billing_day"><%:每月统计开始日期%></label>
+        <input id="billing_day" type="number" min="1" max="28" step="1" /> <span><%:日%></span>
+    </div>
+    <button id="save_limit" class="cbi-button cbi-button-apply"><%:保存流量设置%></button>
+
+    <h3><%:手动校准%></h3>
+    <p class="atsd-traffic-note"><%:输入运营商或手机营业厅显示的本月已用总流量，保存后从该数值继续累计。%></p>
+    <div class="atsd-traffic-row">
+        <label for="calibrated_gb"><%:本月已使用流量%></label>
+        <input id="calibrated_gb" type="number" min="0" step="0.01" /> <span>GB</span>
+    </div>
+    <button id="calibrate_usage" class="cbi-button cbi-button-action"><%:校准已用流量%></button>
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+(function() {
+    var previous = null;
+    var formInitialized = false;
+
+    function formatBytes(bytes) {
+        if (typeof bytes !== 'number') return '--';
+        var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        var index = 0;
+        while (bytes >= 1024 && index < units.length - 1) { bytes /= 1024; index++; }
+        return bytes.toFixed(index === 0 ? 0 : 2) + ' ' + units[index];
+    }
+
+    function formatSpeed(bytesPerSecond) {
+        return formatBytes(Math.max(0, bytesPerSecond)) + '/s';
+    }
+
+    function formatDuration(seconds) {
+        if (typeof seconds !== 'number') return '--';
+        var days = Math.floor(seconds / 86400);
+        var hours = Math.floor(seconds % 86400 / 3600);
+        var minutes = Math.floor(seconds % 3600 / 60);
+        var secs = seconds % 60;
+        return (days ? days + '天 ' : '') + hours + '时 ' + minutes + '分 ' + secs + '秒';
+    }
+
+    function setText(id, value) { document.getElementById(id).textContent = value; }
+
+    XHR.poll(5, '<%=luci.dispatcher.build_url("admin", "modem-AK68", "traffic_stats")%>', null, function(x, data) {
+        if (!data || !data.success) {
+            document.getElementById('traffic_error').textContent = data && data.error ? data.error : '读取流量统计失败。';
+            return;
+        }
+        document.getElementById('traffic_error').textContent = '';
+        var now = Date.now();
+        if (previous) {
+            var seconds = (now - previous.time) / 1000;
+            setText('speed_tx', formatSpeed((data.total_tx - previous.tx) / seconds));
+            setText('speed_rx', formatSpeed((data.total_rx - previous.rx) / seconds));
+        }
+        previous = { time: now, tx: data.total_tx, rx: data.total_rx };
+        setText('last_tx', formatBytes(data.last_tx));
+        setText('last_rx', formatBytes(data.last_rx));
+        setText('total_tx', formatBytes(data.total_tx));
+        setText('total_rx', formatBytes(data.total_rx));
+        setText('last_time', formatDuration(data.last_time));
+        setText('total_time', formatDuration(data.total_time));
+        setText('monthly_used', formatBytes(data.monthly_used));
+        setText('monthly_remaining', data.limit_enabled ? formatBytes(data.monthly_remaining) : '未启用限额');
+        setText('monthly_limit', data.limit_enabled ? formatBytes(data.monthly_limit) : '未启用');
+        var status = document.getElementById('limit_status');
+        status.textContent = data.blocked ? '已达限额，蜂窝网络已断开' : '正常';
+        status.className = 'atsd-traffic-value' + (data.blocked ? ' atsd-blocked' : '');
+        if (!formInitialized) {
+            document.getElementById('limit_enabled').checked = data.limit_enabled;
+            document.getElementById('limit_gb').value = (data.monthly_limit / 1073741824).toFixed(2);
+            document.getElementById('billing_day').value = data.billing_day;
+            document.getElementById('calibrated_gb').value = (data.monthly_used / 1073741824).toFixed(2);
+            formInitialized = true;
+        }
+    });
+
+    document.getElementById('save_limit').addEventListener('click', function() {
+        XHR.post('<%=luci.dispatcher.build_url("admin", "modem-AK68", "traffic_config")%>', {
+            token: '<%=token%>',
+            enabled: document.getElementById('limit_enabled').checked ? '1' : '0',
+            limit_gb: document.getElementById('limit_gb').value,
+            billing_day: document.getElementById('billing_day').value
+        }, function(x, data) {
+            document.getElementById('traffic_error').textContent = data && data.success ? '流量设置已保存。' : (data && data.error ? data.error : '保存失败。');
+        });
+    });
+
+    document.getElementById('calibrate_usage').addEventListener('click', function() {
+        var value = document.getElementById('calibrated_gb').value;
+        if (!confirm('确定将本月已用流量校准为 ' + value + ' GB 吗？')) return;
+        XHR.post('<%=luci.dispatcher.build_url("admin", "modem-AK68", "traffic_calibrate")%>', {
+            token: '<%=token%>', used_gb: value
+        }, function(x, data) {
+            document.getElementById('traffic_error').textContent = data && data.success ? '已用流量校准成功。' : (data && data.error ? data.error : '校准失败。');
+        });
+    });
+})();
+//]]>
+</script>
+
+<%+footer%>

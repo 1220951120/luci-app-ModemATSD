@@ -1,0 +1,156 @@
+<%+header%>
+
+<style>
+.atsd-debug-tabs { display:flex; flex-wrap:wrap; gap:8px; margin:15px 0; }
+.atsd-debug-tab { min-width:120px; }
+.atsd-debug-tab.active { background:var(--primary, #1677ff) !important; color:#fff !important; }
+.atsd-debug-panel { display:none; padding:16px; border:1px solid rgba(127,127,127,.25); border-radius:8px; background:rgba(127,127,127,.08); }
+.atsd-debug-panel.active { display:block; }
+.atsd-debug-row { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:10px 0; }
+.atsd-debug-row input[type="text"] { flex:1 1 360px; min-width:220px; }
+.atsd-debug-output { box-sizing:border-box; width:100%; min-height:260px; max-height:520px; margin-top:12px; padding:14px; overflow:auto; border:1px solid rgba(127,127,127,.35); border-radius:6px; background:#111; color:#ddd; white-space:pre-wrap; word-break:break-word; }
+.atsd-debug-note { opacity:.75; }
+.atsd-debug-status { min-height:20px; margin-left:auto; opacity:.8; }
+.atsd-log-options { margin-left:auto; }
+@media (max-width:600px) {
+    .atsd-debug-tab { flex:1 1 30%; min-width:100px; }
+    .atsd-log-options { width:100%; margin-left:0; }
+}
+</style>
+
+<h2><%:模块调试%></h2>
+<p class="atsd-debug-note"><%:AT 命令、只读功能自检和 ATSD 守护进程日志集中在此页面。所有命令仍通过全局 AT 锁串行执行。%></p>
+
+<div class="atsd-debug-tabs" role="tablist">
+    <button type="button" class="cbi-button atsd-debug-tab active" data-panel="at_panel"><%:AT 命令调试%></button>
+    <button type="button" class="cbi-button atsd-debug-tab" data-panel="test_panel"><%:功能测试%></button>
+    <button type="button" class="cbi-button atsd-debug-tab" data-panel="log_panel"><%:ModemATSD 日志%></button>
+</div>
+
+<section id="at_panel" class="atsd-debug-panel active">
+    <h3><%:AT 命令调试%></h3>
+    <p class="atsd-debug-note"><%:这里允许发送任意模组命令。设置类命令可能导致断网、重启模组或改变锁网配置，请确认命令含义后再发送。%></p>
+    <div class="atsd-debug-row">
+        <input type="text" id="at_command" maxlength="512" autocomplete="off" placeholder="例如：AT^SYSCFGEX?" />
+        <button type="button" id="send_at" class="cbi-button cbi-button-action"><%:发送命令%></button>
+        <button type="button" id="clear_at" class="cbi-button"><%:清空显示%></button>
+    </div>
+    <pre id="at_output" class="atsd-debug-output">等待发送命令...</pre>
+</section>
+
+<section id="test_panel" class="atsd-debug-panel">
+    <h3><%:ATSD 功能测试%></h3>
+    <p class="atsd-debug-note"><%:测试只发送查询类 AT 命令，不会切换网络、修改锁网设置、发送短信或清零流量。%></p>
+    <button type="button" id="run_test" class="cbi-button cbi-button-action"><%:开始测试%></button>
+    <pre id="test_output" class="atsd-debug-output">等待测试...</pre>
+</section>
+
+<section id="log_panel" class="atsd-debug-panel">
+    <h3><%:ModemATSD 汇总日志%></h3>
+    <p class="atsd-debug-note"><%:历史运行文件显示在前，持续更新的实时系统日志显示在最后。停留在底部时会自动跟随最新日志，向上滚动后可暂停跟随以便查阅历史内容。%></p>
+    <div class="atsd-debug-row">
+        <button type="button" id="refresh_log" class="cbi-button cbi-button-action"><%:刷新日志%></button>
+        <button type="button" id="clear_log" class="cbi-button"><%:清空显示%></button>
+        <label><input type="checkbox" id="auto_log" checked="checked" /> <%:每 5 秒自动刷新%></label>
+        <label class="atsd-log-options"><%:显示行数%>
+            <select id="log_lines"><option value="100">100</option><option value="200" selected="selected">200</option><option value="500">500</option></select>
+        </label>
+        <span id="log_status" class="atsd-debug-status"></span>
+    </div>
+    <pre id="log_output" class="atsd-debug-output">切换到此标签后读取日志...</pre>
+</section>
+
+<script type="text/javascript">
+//<![CDATA[
+(function() {
+    var token = '<%=luci.dispatcher.context.authsession%>';
+    var activePanel = 'at_panel';
+    var logTimer = null;
+
+    function setPanel(panelId) {
+        activePanel = panelId;
+        document.querySelectorAll('.atsd-debug-tab').forEach(function(button) {
+            button.classList.toggle('active', button.getAttribute('data-panel') === panelId);
+        });
+        document.querySelectorAll('.atsd-debug-panel').forEach(function(panel) {
+            panel.classList.toggle('active', panel.id === panelId);
+        });
+        if (panelId === 'log_panel') refreshLog();
+    }
+
+    document.querySelectorAll('.atsd-debug-tab').forEach(function(button) {
+        button.addEventListener('click', function() { setPanel(this.getAttribute('data-panel')); });
+    });
+
+    function sendAt() {
+        var input = document.getElementById('at_command');
+        var button = document.getElementById('send_at');
+        var output = document.getElementById('at_output');
+        var command = input.value.trim();
+        if (!command) { output.textContent = '请输入 AT 命令。'; return; }
+        button.disabled = true;
+        output.textContent = '> ' + command + '\n执行中...';
+        XHR.post('<%=luci.dispatcher.build_url("admin", "modem-AK68", "send_at")%>', {
+            token: token,
+            command: command
+        }, function(x, data) {
+            if (data && data.success) output.textContent = '> ' + command + '\n\n' + (data.output || '命令执行完成，但没有返回内容。');
+            else output.textContent = '> ' + command + '\n\n' + (data && data.error ? data.error : '命令请求失败。');
+            button.disabled = false;
+        });
+    }
+
+    document.getElementById('send_at').addEventListener('click', sendAt);
+    document.getElementById('at_command').addEventListener('keydown', function(event) {
+        if (event.key === 'Enter') { event.preventDefault(); sendAt(); }
+    });
+    document.getElementById('clear_at').addEventListener('click', function() {
+        document.getElementById('at_output').textContent = '';
+    });
+
+    document.getElementById('run_test').addEventListener('click', function() {
+        var button = this;
+        var output = document.getElementById('test_output');
+        button.disabled = true;
+        output.textContent = '测试中，请稍候...';
+        XHR.get('<%=luci.dispatcher.build_url("admin", "modem-AK68", "run_selftest")%>', null, function(x, data) {
+            output.textContent = data && data.output ? data.output : '测试请求失败。';
+            button.disabled = false;
+        });
+    });
+
+    function refreshLog() {
+        if (activePanel !== 'log_panel') return;
+        var status = document.getElementById('log_status');
+        status.textContent = '读取中...';
+        XHR.get('<%=luci.dispatcher.build_url("admin", "modem-AK68", "atsd_log")%>', {
+            lines: document.getElementById('log_lines').value
+        }, function(x, data) {
+            if (data && data.success) {
+                var output = document.getElementById('log_output');
+                var firstLoad = output.textContent === '切换到此标签后读取日志...' || output.textContent === '';
+                var followLatest = firstLoad || output.scrollHeight - output.scrollTop - output.clientHeight < 48;
+                output.textContent = data.output || '暂时没有 ModemATSD 日志。';
+                if (followLatest) output.scrollTop = output.scrollHeight;
+                status.textContent = '更新时间：' + data.timestamp;
+            } else {
+                status.textContent = '日志读取失败';
+            }
+        });
+    }
+
+    document.getElementById('refresh_log').addEventListener('click', refreshLog);
+    document.getElementById('log_lines').addEventListener('change', refreshLog);
+    document.getElementById('clear_log').addEventListener('click', function() {
+        document.getElementById('log_output').textContent = '';
+        document.getElementById('log_status').textContent = '仅清空了当前页面显示';
+    });
+    logTimer = window.setInterval(function() {
+        if (document.getElementById('auto_log').checked) refreshLog();
+    }, 5000);
+    window.addEventListener('beforeunload', function() { window.clearInterval(logTimer); });
+})();
+//]]>
+</script>
+
+<%+footer%>

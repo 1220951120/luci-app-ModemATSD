@@ -1,0 +1,6 @@
+#!/bin/sh
+
+# Serialize every ATSD client call, including calls made outside this package.
+exec 200>/tmp/atsd_tools_cli-AK68.lock
+flock -x 200
+exec /usr/bin/atsd_tools_cli.real "$@"

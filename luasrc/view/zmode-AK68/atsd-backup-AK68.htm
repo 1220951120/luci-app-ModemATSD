@@ -1,0 +1,29 @@
+<%+header%>
+
+<h2><%:ATSD 设置备份与恢复%></h2>
+<p><%:备份包含模组 UCI 设置、月度流量状态、短信转发设置和永久关灯状态，不包含固件及程序文件。%></p>
+
+<% if message then %>
+<div class="alert-message"><%=message%></div>
+<% end %>
+
+<div class="cbi-section">
+    <h3><%:导出备份%></h3>
+    <p><%:下载一份可以单独恢复到本 ATSD 插件的设置文件。%></p>
+    <form method="get" action="<%=luci.dispatcher.build_url('admin', 'modem-AK68', 'backup')%>">
+        <input type="hidden" name="download" value="1" />
+        <button type="submit" class="cbi-button cbi-button-action"><%:导出ATSD设置%></button>
+    </form>
+</div>
+
+<div class="cbi-section">
+    <h3><%:导入恢复%></h3>
+    <p><%:只接受由此页面导出的备份。恢复会覆盖当前 ATSD 设置并重新加载流量和 LED 定时服务。%></p>
+    <form method="post" enctype="multipart/form-data" action="<%=luci.dispatcher.build_url('admin', 'modem-AK68', 'backup')%>">
+        <input type="hidden" name="token" value="<%=token%>" />
+        <input type="file" name="archive" accept=".tar.gz,application/gzip" />
+        <button type="submit" name="restore" value="1" class="cbi-button cbi-button-apply"><%:导入并恢复%></button>
+    </form>
+</div>
+
+<%+footer%>

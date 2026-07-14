@@ -1,0 +1,23 @@
+<%+header%>
+
+<h2><%:ATSD 功能测试%></h2>
+<p><%:测试只发送查询类 AT 命令，不会切换网络、修改锁网设置、发送短信或清零流量。测试期间其他 AT 请求会通过全局锁排队。%></p>
+<button id="run_test" class="cbi-button cbi-button-action"><%:开始测试%></button>
+<pre id="test_output" style="margin-top:15px;padding:15px;min-height:240px;background:#111;color:#ddd;white-space:pre-wrap;">等待测试...</pre>
+
+<script type="text/javascript">
+//<![CDATA[
+document.getElementById('run_test').addEventListener('click', function() {
+    var button = this;
+    var output = document.getElementById('test_output');
+    button.disabled = true;
+    output.textContent = '测试中，请稍候...';
+    XHR.get('<%=luci.dispatcher.build_url("admin", "modem-AK68", "run_selftest")%>', null, function(x, data) {
+        output.textContent = data && data.output ? data.output : '测试请求失败。';
+        button.disabled = false;
+    });
+});
+//]]>
+</script>
+
+<%+footer%>
