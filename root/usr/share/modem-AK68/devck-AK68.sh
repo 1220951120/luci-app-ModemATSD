@@ -62,6 +62,19 @@ do
                 sleep 1
                 continue
             fi
+    elif ping -c 1 192.168.200.1 > /dev/null 2>&1; then
+            cp -f /usr/share/modem-AK68/C-NU313 /etc/config/atsd_tools
+            /etc/init.d/atsd_tools restart
+            sleep 1
+            output=$(atsd_tools_cli -i cpe -c "ATI")
+            if echo "$output" | grep -Eiq "NU313|UNISOC|UIS"; then
+                echo "已有设备" > /tmp/devck.conf
+                echo "NU313" > /tmp/modconf-AK68.conf
+            else
+                echo "检测到IP 192.168.200.1,但该IP不是NU313模组！已跳过。"
+                sleep 1
+                continue
+            fi
     else
         echo "AK68套件断开或未接入！" > /tmp/modconf-AK68.conf
         echo 0 > /sys/class/leds/hc:blue:cmode5/brightness

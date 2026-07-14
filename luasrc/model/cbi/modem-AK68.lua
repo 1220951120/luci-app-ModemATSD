@@ -32,7 +32,7 @@ local function is_module_connected()
     if file then
         local content = file:read("*all")
         file:close()
-        return content and string.find(content, "RM520N") ~= nil
+        return content and (string.find(content, "RM520N") ~= nil or string.find(content, "NU313") ~= nil)
     end
     return false
 end
@@ -44,7 +44,7 @@ if not is_module_connected() then
 end
 
 m = Map("modem-AK68", translate("AK68移动网络设置"))
-section = m:section(TypedSection, "ndis", translate("AK68模组设置-移远RM520N"))
+section = m:section(TypedSection, "ndis", translate("AK68模组设置-移远RM520N/NU313"))
 section.anonymous = true
 section.addremove = false
 section:tab("general", translate("常规设置"))

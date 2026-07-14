@@ -34,6 +34,11 @@ do
           if echo "$output" | grep -q "MT5700"; then
               echo "MT5700" > /tmp/modconf-AK68.conf
           fi
+    elif ping -c 1 192.168.200.1 > /dev/null 2>&1; then
+          output=$(atsd_tools_cli -i cpe -c "ATI")
+          if echo "$output" | grep -Eiq "NU313|UNISOC|UIS"; then
+              echo "NU313" > /tmp/modconf-AK68.conf
+          fi
     else
         echo "AK68套件断开或未接入！" > /tmp/modconf-AK68.conf
         echo "设备检测中..." > /tmp/devck.conf
@@ -250,5 +255,4 @@ done
 
 # 释放锁
 flock -u 200
-
 

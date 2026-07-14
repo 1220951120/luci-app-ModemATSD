@@ -14,7 +14,7 @@ function index()
 	if file then
 		local content = file:read("*all")
 		file:close()
-		if content and string.find(content, "RM520") then
+		if content and (string.find(content, "RM520") or string.find(content, "NU313")) then
 			template_name = "zmode-AK68/net_status_RM520-AK68"
 			modem_cbi = "modem-AK68"
 		elseif content and string.find(content, "MT5700") then
@@ -48,7 +48,7 @@ function action_nets()
     local template = require "luci.template"
     local content = fs.readfile("/tmp/modconf-AK68.conf") or ""
 
-    if content:find("RM520", 1, true) then
+    if content:find("RM520", 1, true) or content:find("NU313", 1, true) then
         template.render("zmode-AK68/net_status_RM520-AK68")
     elseif content:find("MT5700", 1, true) then
         template.render("zmode-AK68/net_status_MT5700-AK68")
