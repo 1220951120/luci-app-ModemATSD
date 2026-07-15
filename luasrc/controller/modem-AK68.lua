@@ -71,7 +71,20 @@ local function parse_hex(value)
     if not value then
         return nil
     end
-    return tonumber(value:gsub("^%s+", ""):gsub("%s+$", ""), 16)
+
+    -- Lua 5.1 on OpenWrt is commonly built with a 32-bit lua_Integer.
+    -- tonumber(value, 16) then saturates at 0xffffffff even though
+    -- lua_Number itself can exactly represent these modem counters.
+    local result = 0
+    value = value:gsub("^%s+", ""):gsub("%s+$", "")
+    for i = 1, #value do
+        local digit = tonumber(value:sub(i, i), 16)
+        if not digit then
+            return nil
+        end
+        result = result * 16 + digit
+    end
+    return result
 end
 
 function action_status_refresh_config()
