@@ -385,21 +385,63 @@ end
 -------------------------------------------------------------------------------
 -----发短信
 function action_smscs()
-    local rv = {}
-    local set = luci.http.formvalue("set")
-    rv["at"] = set 
-    os.execute(set)
-    local handle = io.popen("/usr/share/modem-AK68/smsc-AK68.sh 2>&1")
-    local result = handle:read("*a")
-    local exit_code = handle:close()
-
-    if exit_code ~= 0 then
-        rv["smsc"] = "Error executing SMSC script: " .. result
-    else
-        rv["smsc"] = result
-    end
     luci.http.prepare_content("application/json")
-    luci.http.write_json(rv)
+    local operation = luci.http.formvalue("op") or "list"
+
+    if operation == "list" then
+        local jsonc = require "luci.jsonc"
+        local output = luci.sys.exec("/usr/bin/sms_pdu_AK68.py --status all --format json 2>&1") or ""
+        local result = jsonc.parse(output)
+        if not result then
+            luci.http.write_json({ success = false, messages = {}, error = "短信解析程序返回了无效数据。" })
+            return
+        end
+        if result.errors and #result.errors > 0 then
+            result.warning = table.concat(result.errors, "；")
+        end
+        luci.http.write_json(result)
+        return
+    end
+
+    if not require_post() then return end
+
+    local commands = {}
+    if operation == "delete_all" then
+        commands[1] = "AT+CMGD=0,4"
+    elseif operation == "delete" then
+        local raw_indexes = luci.http.formvalue("indexes") or ""
+        local seen = {}
+        for value in raw_indexes:gmatch("[^,]+") do
+            if not value:match("^%d+$") then
+                luci.http.write_json({ success = false, error = "短信编号格式无效。" })
+                return
+            end
+            local index = tonumber(value)
+            if not index or index < 0 or index > 65535 or seen[index] then
+                luci.http.write_json({ success = false, error = "短信编号无效或重复。" })
+                return
+            end
+            seen[index] = true
+            commands[#commands + 1] = "AT+CMGD=" .. tostring(index)
+        end
+        if #commands == 0 or #commands > 255 then
+            luci.http.write_json({ success = false, error = "没有可删除的短信编号。" })
+            return
+        end
+    else
+        luci.http.write_json({ success = false, error = "不支持的短信操作。" })
+        return
+    end
+
+    for _, command in ipairs(commands) do
+        local output = atsd_command(command)
+        if not output:find("OK", 1, true) then
+            luci.http.write_json({ success = false, error = "删除短信失败。", raw = output })
+            return
+        end
+    end
+    modem_log("短信", operation == "delete_all" and "已删除全部设备短信" or "已删除设备短信 " .. (luci.http.formvalue("indexes") or ""))
+    luci.http.write_json({ success = true })
 end
 -----------------------------------------------------------------------------------
 ------------获取信号状态

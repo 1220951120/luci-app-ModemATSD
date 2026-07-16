@@ -101,12 +101,23 @@
         .delete-button:hover {
             background: #c9302c;
         }
+
+        #sms-status {
+            margin-top: 12px;
+            min-height: 1.5em;
+            color: #666;
+        }
+
+        #sms-status.error {
+            color: #c9302c;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <button class="button" onclick="sendcmd()">刷新短信</button>
         <button class="button-2" onclick="confirmDelete()">删除所有短信</button>
+        <div id="sms-status"></div>
         <table id="messages">
             <thead>
                 <tr>
@@ -123,12 +134,22 @@
 
     <script type="text/javascript">
         function sendcmd() {
-            var s = 'at+cmgl=4'; 
-            var v = '1'; 
-            XHR.get('<%=luci.dispatcher.build_url("admin", "modem-AK68", "smscs")%>', { set: s}, function(x, rv) {
-                var pd = rv.smsc;
-                displayMessages(pd);
+            setStatus('正在读取短信…', false);
+            XHR.get('<%=luci.dispatcher.build_url("admin", "modem-AK68", "smscs")%>', { op: 'list' }, function(x, rv) {
+                if (!rv || !rv.success) {
+                    setStatus(rv && (rv.error || rv.warning) ? (rv.error || rv.warning) : '读取短信失败。', true);
+                    displayMessages([]);
+                    return;
+                }
+                displayMessages(rv.messages || []);
+                setStatus(rv.warning || ('共读取到 ' + (rv.messages || []).length + ' 条短信。'), !!rv.warning);
             });
+        }
+
+        function setStatus(message, isError) {
+            var status = document.getElementById('sms-status');
+            status.textContent = message || '';
+            status.className = isError ? 'error' : '';
         }
 
         function confirmDelete() {
@@ -139,53 +160,73 @@
         }
 
         function deleteMessage(index) {
-            var command = 'atsd_tools_cli -i cpe -c AT+CMGD=' + index;
-            var port = '1'; 
-            XHR.get('<%=luci.dispatcher.build_url("admin", "modem-AK68", "smscs")%>', { set: command}, function(x, rv) {
-                sendcmd();
+            XHR.post('<%=luci.dispatcher.build_url("admin", "modem-AK68", "smscs")%>', {
+                token: '<%=token%>', op: 'delete', indexes: index
+            }, function(x, rv) {
+                if (rv && rv.success) {
+                    sendcmd();
+                } else {
+                    setStatus(rv && rv.error ? rv.error : '删除短信失败。', true);
+                }
             });
         }
 
         function deleteallMessage() {
-            var command = 'atsd_tools_cli -i cpe -c AT+CMGD=0,4'
-            var port = '1'; 
-            XHR.get('<%=luci.dispatcher.build_url("admin", "modem-AK68", "smscs")%>', { set: command}, function(x, rv) {
-                sendcmd();
-                alert('用户已删除所有短信！');
+            XHR.post('<%=luci.dispatcher.build_url("admin", "modem-AK68", "smscs")%>', {
+                token: '<%=token%>', op: 'delete_all'
+            }, function(x, rv) {
+                if (rv && rv.success) {
+                    sendcmd();
+                    alert('用户已删除所有短信！');
+                } else {
+                    setStatus(rv && rv.error ? rv.error : '删除所有短信失败。', true);
+                }
             });
         }
 
-        function displayMessages(smsData) {
-            var messagesContainer = document.getElementById("messages").getElementsByTagName('tbody')[0];
-            messagesContainer.innerHTML = ''; // 清空之前的短信
-            var messages = smsData.split('------------------------------------------------------\n');
-            messages.forEach(function(message, index) {
-                if (message.trim() !== '') {
-                    var lines = message.split('\n');
-                    var sender = lines[2].split(':')[1];
-                    var time = lines[3].split(':')[1];
-                    var content = lines.slice(4).join('\n');
-                    var row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td>${sender}</td>
-                        <td>${time}</td>
-                        <td>${content}</td>
-                        <td><button class="delete-button" data-index="${index}">删除</button></td>
-                    `;
-                    messagesContainer.appendChild(row);
-                }
-            });
+        function appendCell(row, value) {
+            var cell = document.createElement('td');
+            cell.textContent = value == null ? '' : String(value);
+            row.appendChild(cell);
+            return cell;
+        }
 
-            var deleteButtons = document.querySelectorAll('.delete-button');
-                deleteButtons.forEach(function(button) {
-                    button.addEventListener('click', function() {
-                        var index = this.getAttribute('data-index');
-                        var userConfirmed = confirm('您确定要删除第 ' + index + ' 条短信吗？');
-                        if (userConfirmed) {
-                            deleteMessage(index);
-                        } 
-                    });
+        function displayMessages(messages) {
+            var messagesContainer = document.getElementById("messages").getElementsByTagName('tbody')[0];
+            messagesContainer.textContent = '';
+            if (!messages.length) {
+                var emptyRow = document.createElement('tr');
+                var emptyCell = appendCell(emptyRow, '设备中没有短信。');
+                emptyCell.colSpan = 4;
+                messagesContainer.appendChild(emptyRow);
+                return;
+            }
+
+            messages.forEach(function(message) {
+                var row = document.createElement('tr');
+                appendCell(row, message.sender || '未知');
+                appendCell(row, message.timestamp || '未知');
+                var content = message.content || '';
+                if (!message.complete) {
+                    content += '\n[长短信尚未收全：已收到 ' + message.indexes.length + '/' + message.segment_count + ' 段]';
+                }
+                appendCell(row, content);
+
+                var actionCell = document.createElement('td');
+                var button = document.createElement('button');
+                var indexes = (message.indexes || []).join(',');
+                button.type = 'button';
+                button.className = 'delete-button';
+                button.textContent = '删除';
+                button.addEventListener('click', function() {
+                    if (confirm('确定删除设备中的第 ' + indexes + ' 条短信吗？')) {
+                        deleteMessage(indexes);
+                    }
                 });
+                actionCell.appendChild(button);
+                row.appendChild(actionCell);
+                messagesContainer.appendChild(row);
+            });
         }
 
         window.onload = function() {
@@ -194,4 +235,3 @@
     </script>
 </body>
 <%+footer%>
-

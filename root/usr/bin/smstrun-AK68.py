@@ -1,29 +1,10 @@
-import json
 import os
-import re
 import time
 import requests
-import subprocess
 from datetime import datetime
 
+import sms_pdu_AK68
 
-def normalize_sms_time(message):
-    """Undo the timezone offset that pdu_decoder-AK68 adds twice to SCTS."""
-    local_offset = datetime.now().astimezone().utcoffset()
-    if local_offset is None:
-        return message
-
-    pattern = re.compile(r"(发件时间:\s*)(\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})")
-
-    def replace_time(match):
-        try:
-            decoded_time = datetime.strptime(match.group(2), "%m/%d/%y %H:%M:%S")
-            corrected_time = decoded_time - local_offset
-            return match.group(1) + corrected_time.strftime("%m/%d/%y %H:%M:%S")
-        except ValueError:
-            return match.group(0)
-
-    return pattern.sub(replace_time, message)
 
 def read_token_from_config():
     config_path = "/usr/bin/smstrun-AK68.conf"
@@ -89,22 +70,44 @@ def forward():
         token = read_token_from_config()
         print("Enjoy! 已完成测试并开启转发功能，重启后完成开机自启。")
         count = 0
+        seen_fingerprints = set()
+        initial_scan = True
         while True:
             try:
-                result = subprocess.run(['sh', '/usr/bin/smstrun-AK68.sh'], capture_output=True, text=True, check=True)
-                out = result.stdout
-                if "发件人" in out:
-                    title = read_title_from_config()
-                    message = normalize_sms_time(out)
-                    push_pushplus(message, token, title)
-                    count += 1
-                    write_summary_to_file(count, message)
-                else:
+                messages, errors = sms_pdu_AK68.read_messages("all")
+                for error in errors:
+                    print(error)
+
+                forwarded = False
+                for sms in messages:
+                    fingerprints = set(sms["fingerprints"])
+                    if fingerprints.issubset(seen_fingerprints):
+                        continue
+
+                    # On startup, forward only messages that were still unread.
+                    # During normal operation an unseen fingerprint is new even
+                    # if a LuCI refresh changed its modem status to "read" first.
+                    should_forward = not initial_scan or 0 in sms["statuses"]
+                    if not should_forward:
+                        seen_fingerprints.update(fingerprints)
+                        continue
+                    if not sms["complete"]:
+                        print(
+                            "长短信尚未收全，等待剩余分段: "
+                            f"{len(sms['indexes'])}/{sms['segment_count']}"
+                        )
+                        continue
+
+                    message = sms_pdu_AK68.format_message(sms)
+                    if push_pushplus(message, token, read_title_from_config()):
+                        seen_fingerprints.update(fingerprints)
+                        count += 1
+                        write_summary_to_file(count, message)
+                        forwarded = True
+
+                initial_scan = False
+                if not forwarded:
                     print("未检测到新消息，继续检测...")
-            except subprocess.CalledProcessError as e:
-                print(f"执行命令失败: {e}. 返回值: {e.returncode}. 错误信息: {e.stderr}")
-            except UnicodeDecodeError as e:
-                print(f"解码错误: {e}. 尝试重新运行。")
             except Exception as e:
                 print("发生未处理异常: ", str(e))
             time.sleep(5)
@@ -112,18 +115,21 @@ def forward():
         remove_lock(lock_file)
 
 def push_pushplus(message, token, title):
-    url = "http://www.pushplus.plus/send"
+    url = "https://www.pushplus.plus/send"
     data = {
         "token": token,
         "title": title,
         "content": message
     }
     try:
-        response = requests.post(url, json=data)
+        response = requests.post(url, json=data, timeout=15)
+        response.raise_for_status()
         result = response.json()
         print("Response:\n", result)
+        return str(result.get("code")) == "200"
     except Exception as e:
         print("Error occurred: ", str(e))
+        return False
 
 if __name__ == '__main__':
     forward()
