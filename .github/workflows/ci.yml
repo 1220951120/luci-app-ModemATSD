@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Run SMS PDU tests
+        run: python3 -m unittest tests/test_sms_pdu_AK68.py
+
+      - name: Check unified SMS page JavaScript
+        shell: bash
+        run: |
+          sed -n '/<script type="text\/javascript">/,/<\/script>/p' \
+            luasrc/view/zmode-AK68/smsc-AK68.htm \
+            | sed '1d;$d' \
+            | sed -E 's#<%=[^%]*%>##g' \
+            | node --check
