@@ -1,237 +1,322 @@
 <%+header%>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <H2>ATSD-AK68模组短信管理工具</H2>
-    <H4>提示：新收取短信需要在模组设置里面打开短信开关！</H4>
-    <style>
 
-        h2 {
-            margin-bottom: 20px;
-            color: #ffffff;
-            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.1);
-            background: #000000;
-            text-align: center;
-        }
+<style>
+.sms-center { max-width:1200px; margin:0 auto; }
+.sms-center h2 { margin:0 0 8px; }
+.sms-note { margin:0 0 16px; color:#666; }
+.sms-tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; border-bottom:1px solid #ddd; padding-bottom:10px; }
+.sms-tab { padding:8px 18px; border:1px solid #bbb; border-radius:5px; background:#f5f5f5; cursor:pointer; white-space:nowrap; }
+.sms-tab.active { color:#fff; border-color:#bb5a00; background:#bb5a00; }
+.sms-panel { display:none; }
+.sms-panel.active { display:block; }
+.sms-card { margin-bottom:18px; padding:16px; border:1px solid #ddd; border-radius:7px; background:rgba(255,255,255,.35); }
+.sms-card h3 { margin:0 0 14px; }
+.sms-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:10px; }
+.sms-button { display:inline-flex; align-items:center; justify-content:center; min-height:34px; padding:7px 14px; border:0; border-radius:5px; color:#fff; background:#bb5a00; cursor:pointer; white-space:nowrap; word-break:keep-all; }
+.sms-button:hover { background:#914600; }
+.sms-button.danger { background:#c9302c; }
+.sms-button.secondary { background:#666; }
+.sms-button:disabled { opacity:.55; cursor:not-allowed; }
+.sms-status { min-height:1.5em; color:#287928; }
+.sms-status.error { color:#c9302c; }
+.sms-table-wrap { width:100%; overflow-x:auto; }
+.sms-table { width:100%; border-collapse:collapse; table-layout:auto; }
+.sms-table th, .sms-table td { padding:9px; border:1px solid #ccc; vertical-align:top; }
+.sms-table th { color:#fff; background:#bb5a00; white-space:nowrap; }
+.sms-table td { white-space:pre-wrap; overflow-wrap:anywhere; }
+.sms-table .sms-time { min-width:155px; white-space:nowrap; }
+.sms-table .sms-number { min-width:105px; white-space:nowrap; }
+.sms-table .sms-action-cell { width:1%; min-width:72px; text-align:center; white-space:nowrap; word-break:keep-all; }
+.sms-grid { display:grid; grid-template-columns:minmax(130px, 190px) minmax(240px, 1fr); gap:12px; align-items:center; }
+.sms-grid label { font-weight:600; }
+.sms-grid input, .sms-grid textarea { box-sizing:border-box; width:100%; padding:8px; border:1px solid #bbb; border-radius:4px; background:var(--background-color-high, #fff); color:inherit; }
+.sms-grid textarea { min-height:110px; resize:vertical; }
+.sms-grid .sms-grid-actions { grid-column:2; display:flex; flex-wrap:wrap; gap:8px; }
+.sms-forward-state { margin-bottom:12px; font-weight:600; }
+.sms-history { max-height:280px; overflow:auto; padding:10px; border:1px solid #ccc; border-radius:4px; white-space:pre-wrap; background:rgba(127,127,127,.08); }
+@media (max-width:700px) {
+    .sms-grid { grid-template-columns:1fr; }
+    .sms-grid .sms-grid-actions { grid-column:1; }
+    .sms-card { padding:12px; }
+}
+</style>
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-            border-radius: 15px; /* 表格圆角 */
-            overflow: hidden; /* 防止表格内容溢出 */
-        }
+<div class="sms-center">
+    <h2><%:设备短信%></h2>
+    <p class="sms-note"><%:收取和发送短信需要在“模组设置”中开启短信开关。发送记录保存在内存中，重启路由器后自动清空。%></p>
 
-        th, td {
-            padding: 10px;
-            border: 1px solid #ccc
-            
-        }
-
-        td:nth-child(3) { /* 针对第三列的特定样式 */
-            word-wrap: break-word; /* 允许单词断行 */
-            text-align: left;
-        }
-
-        td:nth-child(1) { /* 针对第三列的特定样式 */
-            word-wrap: break-word; /* 允许单词断行 */
-            text-align: center
-            
-            
-        }
-
-        td:nth-child(2) { /* 针对第三列的特定样式 */
-            word-wrap: break-word; /* 允许单词断行 */
-            text-align: center;
-        }
-
-        td:nth-child(4) { /* 针对第三列的特定样式 */
-            word-wrap: break-word; /* 允许单词断行 */
-            text-align: center;
-        }
-
-        th {
-            background-color: #bb5a00;
-            color: white;
-            
-        }
-
-        .button {
-            background: #bb5a00;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            font-size: 1em;
-            cursor: pointer;
-            transition: background 0.3s ease;
-            width: 49%;
-        }
-
-        .button-2 {
-            background: #bb5a00;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            font-size: 1em;
-            cursor: pointer;
-            transition: background 0.3s ease;
-            width: 49%;
-        }
-
-        .button:hover {
-            background: #357ab7;
-        }
-
-        .button-2:hover {
-            background: #357ab7;
-        }
-
-        .delete-button {
-            background: #d9534f;
-            color: white;
-            padding: 5px 10px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: background 0.3s ease;
-        }
-
-        .delete-button:hover {
-            background: #c9302c;
-        }
-
-        #sms-status {
-            margin-top: 12px;
-            min-height: 1.5em;
-            color: #666;
-        }
-
-        #sms-status.error {
-            color: #c9302c;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <button class="button" onclick="sendcmd()">刷新短信</button>
-        <button class="button-2" onclick="confirmDelete()">删除所有短信</button>
-        <div id="sms-status"></div>
-        <table id="messages">
-            <thead>
-                <tr>
-                    <th>发件人</th>
-                    <th>发件时间</th>
-                    <th>内容</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody>
-            </tbody>
-        </table>
+    <div class="sms-tabs" role="tablist">
+        <button type="button" class="sms-tab active" data-panel="sms-inbox"><%:收件箱%></button>
+        <button type="button" class="sms-tab" data-panel="sms-send"><%:发送短信%></button>
+        <button type="button" class="sms-tab" data-panel="sms-forward"><%:短信转发%></button>
     </div>
 
-    <script type="text/javascript">
-        function sendcmd() {
-            setStatus('正在读取短信…', false);
-            XHR.get('<%=luci.dispatcher.build_url("admin", "modem-AK68", "smscs")%>', { op: 'list' }, function(x, rv) {
-                if (!rv || !rv.success) {
-                    setStatus(rv && (rv.error || rv.warning) ? (rv.error || rv.warning) : '读取短信失败。', true);
-                    displayMessages([]);
-                    return;
-                }
-                displayMessages(rv.messages || []);
-                setStatus(rv.warning || ('共读取到 ' + (rv.messages || []).length + ' 条短信。'), !!rv.warning);
-            });
-        }
+    <section id="sms-inbox" class="sms-panel active">
+        <div class="sms-card">
+            <div class="sms-toolbar">
+                <button type="button" id="sms-refresh" class="sms-button"><%:刷新短信%></button>
+                <button type="button" id="sms-delete-all" class="sms-button danger"><%:删除所有短信%></button>
+                <span id="sms-inbox-status" class="sms-status"></span>
+            </div>
+            <div class="sms-table-wrap">
+                <table class="sms-table" id="sms-inbox-table">
+                    <thead><tr><th><%:发件人%></th><th><%:发件时间%></th><th><%:内容%></th><th><%:操作%></th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
 
-        function setStatus(message, isError) {
-            var status = document.getElementById('sms-status');
-            status.textContent = message || '';
-            status.className = isError ? 'error' : '';
-        }
+    <section id="sms-send" class="sms-panel">
+        <div class="sms-card">
+            <h3><%:发送短信%></h3>
+            <div class="sms-grid">
+                <label for="sms-number"><%:接收号码%></label>
+                <input id="sms-number" type="tel" inputmode="tel" placeholder="13800138000 / 10010 / +国际号码">
+                <label for="sms-content"><%:短信内容%></label>
+                <textarea id="sms-content" maxlength="1500" placeholder="请输入短信内容（最多 500 个字符，不支持 Emoji）"></textarea>
+                <div></div>
+                <div id="sms-send-status" class="sms-status"></div>
+                <div class="sms-grid-actions">
+                    <button type="button" id="sms-send-button" class="sms-button"><%:发送短信%></button>
+                </div>
+            </div>
+        </div>
 
-        function confirmDelete() {
-            var userConfirmed2 = confirm("你确定要删除所有AK68设备中的短信吗？此操作无法撤销。");
-            if (userConfirmed2) {
-                deleteallMessage()
-            } 
-        }
+        <div class="sms-card">
+            <div class="sms-toolbar">
+                <h3 style="margin:0 auto 0 0"><%:发送记录%></h3>
+                <button type="button" id="sms-sent-refresh" class="sms-button secondary"><%:刷新记录%></button>
+                <button type="button" id="sms-sent-clear" class="sms-button danger"><%:清空记录%></button>
+            </div>
+            <div class="sms-table-wrap">
+                <table class="sms-table" id="sms-sent-table">
+                    <thead><tr><th><%:时间%></th><th><%:接收号码%></th><th><%:内容%></th><th><%:结果%></th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
 
-        function deleteMessage(index) {
-            XHR.post('<%=luci.dispatcher.build_url("admin", "modem-AK68", "smscs")%>', {
-                token: '<%=token%>', op: 'delete', indexes: index
-            }, function(x, rv) {
-                if (rv && rv.success) {
-                    sendcmd();
-                } else {
-                    setStatus(rv && rv.error ? rv.error : '删除短信失败。', true);
-                }
-            });
-        }
+    <section id="sms-forward" class="sms-panel">
+        <div class="sms-card">
+            <h3><%:PushPlus 短信转发%></h3>
+            <div id="sms-forward-state" class="sms-forward-state"><%:正在读取转发状态…%></div>
+            <div class="sms-grid">
+                <label for="sms-forward-token">PushPlus Token</label>
+                <input id="sms-forward-token" type="password" autocomplete="new-password" placeholder="留空表示保留当前 Token">
+                <label for="sms-forward-title"><%:转发标题%></label>
+                <input id="sms-forward-title" type="text" maxlength="120" placeholder="请输入转发标题">
+                <div></div>
+                <div id="sms-forward-status" class="sms-status"></div>
+                <div class="sms-grid-actions">
+                    <button type="button" id="sms-forward-save" class="sms-button"><%:保存并开启转发%></button>
+                    <button type="button" id="sms-forward-disable" class="sms-button danger"><%:关闭短信转发%></button>
+                    <a class="sms-button secondary" href="https://www.pushplus.plus/push1.html" target="_blank" rel="noopener"><%:申请 Token%></a>
+                </div>
+            </div>
+        </div>
 
-        function deleteallMessage() {
-            XHR.post('<%=luci.dispatcher.build_url("admin", "modem-AK68", "smscs")%>', {
-                token: '<%=token%>', op: 'delete_all'
-            }, function(x, rv) {
-                if (rv && rv.success) {
-                    sendcmd();
-                    alert('用户已删除所有短信！');
-                } else {
-                    setStatus(rv && rv.error ? rv.error : '删除所有短信失败。', true);
-                }
-            });
-        }
+        <div class="sms-card">
+            <div class="sms-toolbar">
+                <h3 style="margin:0 auto 0 0"><%:转发记录%></h3>
+                <button type="button" id="sms-forward-history-refresh" class="sms-button secondary"><%:刷新记录%></button>
+            </div>
+            <div id="sms-forward-history" class="sms-history"><%:暂无转发记录。%></div>
+        </div>
+    </section>
+</div>
 
-        function appendCell(row, value) {
-            var cell = document.createElement('td');
-            cell.textContent = value == null ? '' : String(value);
-            row.appendChild(cell);
-            return cell;
-        }
+<script type="text/javascript">
+//<![CDATA[
+(function() {
+    var api = '<%=luci.dispatcher.build_url("admin", "modem-AK68", "smscs")%>';
+    var csrf = '<%=token%>';
 
-        function displayMessages(messages) {
-            var messagesContainer = document.getElementById("messages").getElementsByTagName('tbody')[0];
-            messagesContainer.textContent = '';
-            if (!messages.length) {
-                var emptyRow = document.createElement('tr');
-                var emptyCell = appendCell(emptyRow, '设备中没有短信。');
-                emptyCell.colSpan = 4;
-                messagesContainer.appendChild(emptyRow);
+    function setStatus(id, text, error) {
+        var node = document.getElementById(id);
+        node.textContent = text || '';
+        node.className = 'sms-status' + (error ? ' error' : '');
+    }
+
+    function appendCell(row, value, className) {
+        var cell = document.createElement('td');
+        cell.textContent = value == null ? '' : String(value);
+        if (className) cell.className = className;
+        row.appendChild(cell);
+        return cell;
+    }
+
+    function emptyTable(body, text, columns) {
+        body.textContent = '';
+        var row = document.createElement('tr');
+        var cell = appendCell(row, text);
+        cell.colSpan = columns;
+        body.appendChild(row);
+    }
+
+    function loadInbox() {
+        setStatus('sms-inbox-status', '正在读取短信…', false);
+        XHR.get(api, { op: 'list' }, function(x, data) {
+            var body = document.querySelector('#sms-inbox-table tbody');
+            if (!data || !data.success) {
+                emptyTable(body, '读取短信失败。', 4);
+                setStatus('sms-inbox-status', data && data.error ? data.error : '读取短信失败。', true);
                 return;
             }
-
-            messages.forEach(function(message) {
-                var row = document.createElement('tr');
-                appendCell(row, message.sender || '未知');
-                appendCell(row, message.timestamp || '未知');
-                var content = message.content || '';
-                if (!message.complete) {
-                    content += '\n[长短信尚未收全：已收到 ' + message.indexes.length + '/' + message.segment_count + ' 段]';
-                }
-                appendCell(row, content);
-
-                var actionCell = document.createElement('td');
-                var button = document.createElement('button');
-                var indexes = (message.indexes || []).join(',');
-                button.type = 'button';
-                button.className = 'delete-button';
-                button.textContent = '删除';
-                button.addEventListener('click', function() {
-                    if (confirm('确定删除设备中的第 ' + indexes + ' 条短信吗？')) {
-                        deleteMessage(indexes);
-                    }
+            var messages = data.messages || [];
+            if (!messages.length) {
+                emptyTable(body, '设备中没有短信。', 4);
+            } else {
+                body.textContent = '';
+                messages.forEach(function(message) {
+                    var row = document.createElement('tr');
+                    appendCell(row, message.sender || '未知', 'sms-number');
+                    appendCell(row, message.timestamp || '未知', 'sms-time');
+                    var content = message.content || '';
+                    if (!message.complete)
+                        content += '\n[长短信尚未收全：已收到 ' + message.indexes.length + '/' + message.segment_count + ' 段]';
+                    appendCell(row, content);
+                    var action = document.createElement('td');
+                    action.className = 'sms-action-cell';
+                    var button = document.createElement('button');
+                    var indexes = (message.indexes || []).join(',');
+                    button.type = 'button';
+                    button.className = 'sms-button danger';
+                    button.textContent = '删除';
+                    button.addEventListener('click', function() {
+                        if (!confirm('确定删除设备中的第 ' + indexes + ' 条短信吗？')) return;
+                        XHR.post(api, { token: csrf, op: 'delete', indexes: indexes }, function(px, result) {
+                            if (result && result.success) loadInbox();
+                            else setStatus('sms-inbox-status', result && result.error ? result.error : '删除失败。', true);
+                        });
+                    });
+                    action.appendChild(button);
+                    row.appendChild(action);
+                    body.appendChild(row);
                 });
-                actionCell.appendChild(button);
-                row.appendChild(actionCell);
-                messagesContainer.appendChild(row);
-            });
-        }
+            }
+            setStatus('sms-inbox-status', data.warning || ('共读取到 ' + messages.length + ' 条短信。'), !!data.warning);
+        });
+    }
 
-        window.onload = function() {
-            sendcmd();
-        };
-    </script>
-</body>
+    function loadSentHistory() {
+        XHR.get(api, { op: 'sent_history' }, function(x, data) {
+            var body = document.querySelector('#sms-sent-table tbody');
+            var records = data && data.success ? (data.records || []) : [];
+            if (!records.length) {
+                emptyTable(body, '暂无发送记录。', 4);
+                return;
+            }
+            body.textContent = '';
+            records.forEach(function(record) {
+                var row = document.createElement('tr');
+                appendCell(row, record.time || '', 'sms-time');
+                appendCell(row, record.number || '', 'sms-number');
+                appendCell(row, record.content || '');
+                appendCell(row, record.success ? '已提交给模组' : ('发送失败：' + (record.error || '未知错误')));
+                body.appendChild(row);
+            });
+        });
+    }
+
+    function loadForwardStatus() {
+        XHR.get(api, { op: 'forward_status' }, function(x, data) {
+            if (!data || !data.success) return;
+            document.getElementById('sms-forward-title').value = data.title || '';
+            document.getElementById('sms-forward-token').placeholder = data.token_configured ? '已配置，留空表示不修改' : '请输入 PushPlus Token';
+            var text = data.enabled ? (data.running ? '短信转发已开启并正在运行。' : '已配置 Token，但转发服务未运行。') : '短信转发未开启。';
+            var node = document.getElementById('sms-forward-state');
+            node.textContent = text;
+            node.style.color = data.enabled && data.running ? '#287928' : '#c9302c';
+        });
+    }
+
+    function loadForwardHistory() {
+        XHR.get(api, { op: 'forward_history' }, function(x, data) {
+            document.getElementById('sms-forward-history').textContent = data && data.history ? data.history : '暂无转发记录。';
+        });
+    }
+
+    document.querySelectorAll('.sms-tab').forEach(function(tab) {
+        tab.addEventListener('click', function() {
+            document.querySelectorAll('.sms-tab').forEach(function(item) { item.classList.remove('active'); });
+            document.querySelectorAll('.sms-panel').forEach(function(item) { item.classList.remove('active'); });
+            tab.classList.add('active');
+            document.getElementById(tab.getAttribute('data-panel')).classList.add('active');
+        });
+    });
+
+    document.getElementById('sms-refresh').addEventListener('click', loadInbox);
+    document.getElementById('sms-delete-all').addEventListener('click', function() {
+        if (!confirm('确定删除设备中的所有短信吗？此操作无法撤销。')) return;
+        XHR.post(api, { token: csrf, op: 'delete_all' }, function(x, data) {
+            if (data && data.success) loadInbox();
+            else setStatus('sms-inbox-status', data && data.error ? data.error : '删除所有短信失败。', true);
+        });
+    });
+
+    document.getElementById('sms-send-button').addEventListener('click', function() {
+        var button = this;
+        var number = document.getElementById('sms-number').value;
+        var message = document.getElementById('sms-content').value;
+        if (!number.trim() || !message.trim()) {
+            setStatus('sms-send-status', '接收号码和短信内容不能为空。', true);
+            return;
+        }
+        if (!confirm('确定发送这条短信吗？')) return;
+        button.disabled = true;
+        setStatus('sms-send-status', '正在发送短信…', false);
+        XHR.post(api, { token: csrf, op: 'send', number: number, message: message }, function(x, data) {
+            button.disabled = false;
+            if (data && data.success) {
+                setStatus('sms-send-status', '短信已提交给模组；最终送达状态由运营商决定。', false);
+                document.getElementById('sms-content').value = '';
+            } else {
+                setStatus('sms-send-status', data && data.error ? data.error : '短信发送失败。', true);
+            }
+            loadSentHistory();
+        });
+    });
+
+    document.getElementById('sms-sent-refresh').addEventListener('click', loadSentHistory);
+    document.getElementById('sms-sent-clear').addEventListener('click', function() {
+        if (!confirm('确定清空本次开机后的发送记录吗？')) return;
+        XHR.post(api, { token: csrf, op: 'sent_clear' }, function(x, data) {
+            if (data && data.success) loadSentHistory();
+        });
+    });
+
+    document.getElementById('sms-forward-save').addEventListener('click', function() {
+        setStatus('sms-forward-status', '正在保存转发设置…', false);
+        XHR.post(api, {
+            token: csrf,
+            op: 'forward_save',
+            forward_token: document.getElementById('sms-forward-token').value,
+            forward_title: document.getElementById('sms-forward-title').value
+        }, function(x, data) {
+            setStatus('sms-forward-status', data && data.success ? '转发设置已保存，服务已经启动。' : (data && data.error ? data.error : '保存失败。'), !(data && data.success));
+            if (data && data.success) document.getElementById('sms-forward-token').value = '';
+            loadForwardStatus();
+        });
+    });
+
+    document.getElementById('sms-forward-disable').addEventListener('click', function() {
+        if (!confirm('确定关闭短信转发吗？')) return;
+        XHR.post(api, { token: csrf, op: 'forward_disable' }, function(x, data) {
+            setStatus('sms-forward-status', data && data.success ? '短信转发已关闭。' : '关闭失败。', !(data && data.success));
+            loadForwardStatus();
+        });
+    });
+
+    document.getElementById('sms-forward-history-refresh').addEventListener('click', loadForwardHistory);
+
+    loadInbox();
+    loadSentHistory();
+    loadForwardStatus();
+    loadForwardHistory();
+})();
+//]]>
+</script>
+
 <%+footer%>

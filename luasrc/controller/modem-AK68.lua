@@ -22,7 +22,6 @@ function index()
 			modem_cbi = "modem5700-AK68" 
 		end
 	end
-	entry({"admin", "modem-AK68", "Smstrun"}, template("zmode-AK68/settings"), _("短信转发"), 94).dependent = true
 	entry({"admin", "modem-AK68", "smsc"}, template("zmode-AK68/smsc-AK68"), _("设备短信"), 95)
 	entry({"admin", "modem-AK68", "nets"}, call("action_nets"), _("模组状态"), 97)
 	entry({"admin", "modem-AK68", "traffic"}, template("zmode-AK68/traffic-AK68"), _("流量统计"), 96)
@@ -37,11 +36,7 @@ function index()
 	entry({"admin", "modem-AK68", "traffic_stats"}, call("action_traffic_stats")).leaf = true
 	entry({"admin", "modem-AK68", "traffic_config"}, call("action_traffic_config")).leaf = true
 	entry({"admin", "modem-AK68", "traffic_calibrate"}, call("action_traffic_calibrate")).leaf = true
-	entry({"admin", "modem-AK68", "smscs"}, call("action_smscs"))
-    entry({"admin", "modem-AK68", "Smstrun", "set_token"}, call("set_token"), nil).leaf = true
-    entry({"admin", "modem-AK68", "Smstrun", "set_title"}, call("set_title"), nil).leaf = true
-    entry({"admin", "modem-AK68", "Smstrun", "check_status"}, call("check_status"), nil).leaf = true
-    entry({"admin", "modem-AK68", "Smstrun", "redhis"}, call("redhis"), nil).leaf = true
+	entry({"admin", "modem-AK68", "smscs"}, call("action_smscs")).leaf = true
 end
 
 function action_nets()
@@ -329,61 +324,101 @@ function action_atsd_log()
     luci.http.write_json({ success = true, output = output, timestamp = os.date("%Y-%m-%d %H:%M:%S") })
 end
 
-----------------短信转发
-------------------------------------------------------------------------------------------------------------
-function set_token()
-    local token = luci.http.formvalue("ppsToken")
-    if token then
-        fs.writefile("/usr/bin/smstrun-AK68.conf", token)
-        local output = luci.sys.exec("/usr/bin/setppstoken-AK68.sh")
-        luci.http.prepare_content("application/json")
-        luci.http.write_json({ result = true, output = output })
-        luci.sys.exec("python3 /usr/bin/smstrun-AK68.py")
-        modem_log("短信转发", token ~= "" and "转发开关 -> 开启" or "转发开关 -> 关闭")
-    else
-        luci.http.status(400, "Bad Request")
-    end
+----------------设备短信、发送与转发
+local SMS_SENT_HISTORY = "/tmp/modem-sms-sent-AK68.jsonl"
+local SMS_FORWARD_TOKEN = "/usr/bin/smstrun-AK68.conf"
+local SMS_FORWARD_TITLE = "/usr/bin/smstrun-title-AK68.conf"
+
+local function trim(value)
+    return (value or ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
 
-function set_title()
-    local title = luci.http.formvalue("smsTitle")
-    if title then
-        fs.writefile("/usr/bin/smstrun-title-AK68.conf", title)
-        local output = luci.sys.exec("/usr/bin/setsmstitle-AK68.sh")
-        luci.http.prepare_content("application/json")
-        luci.http.write_json({ result = true, output = output })
-        modem_log("短信转发", "推送标题已更新")
-    else
-        luci.http.status(400, "Bad Request")
+local function sent_history()
+    local jsonc = require "luci.jsonc"
+    local records = {}
+    local content = fs.readfile(SMS_SENT_HISTORY) or ""
+    for line in content:gmatch("[^\r\n]+") do
+        local ok, record = pcall(jsonc.parse, line)
+        if ok and type(record) == "table" then
+            table.insert(records, 1, record)
+        end
     end
+    return records
 end
 
-
-function check_status()
-    local script = "/usr/bin/smstrun-AK68.py"
-    local token_file = "/usr/bin/smstrun-AK68.conf"
-    local title_file = "/usr/bin/smstrun-title-AK68.conf"
-    local is_running = luci.sys.exec("pgrep -f " .. script) ~= ""
-    local token_content = luci.sys.exec("cat " .. token_file) or ""
-    local title_content = luci.sys.exec("cat " .. title_file) or ""
-    luci.http.prepare_content("application/json")
-    if is_running then
-        luci.http.write_json({ status = "running", token = token_content, title = title_content })
-    else
-        luci.http.write_json({ status = "stopped" })
+local function append_sent_history(record)
+    local jsonc = require "luci.jsonc"
+    local lines = {}
+    local content = fs.readfile(SMS_SENT_HISTORY) or ""
+    for line in content:gmatch("[^\r\n]+") do
+        lines[#lines + 1] = line
     end
+    lines[#lines + 1] = jsonc.stringify(record)
+    while #lines > 100 do table.remove(lines, 1) end
+    fs.writefile(SMS_SENT_HISTORY, table.concat(lines, "\n") .. "\n")
+    fs.chmod(SMS_SENT_HISTORY, "0600")
 end
 
-function redhis()
-    local output = luci.sys.exec("cat /tmp/smstrunsum-AK68.conf") or "" 
-    if output == "" then
-        output = "未发现转发记录，请核对。"
+local function stop_sms_forwarder()
+    local pids = luci.sys.exec("pgrep -f '^python3 /usr/bin/smstrun-AK68.py$'") or ""
+    for pid in pids:gmatch("%d+") do
+        luci.sys.call("kill " .. pid .. " >/dev/null 2>&1")
     end
-    luci.http.prepare_content("application/json")
-    luci.http.write_json({ result = true, output = output })
+    fs.remove("/tmp/smstrun-AK68.lock")
 end
--------------------------------------------------------------------------------
------发短信
+
+local function start_sms_forwarder()
+    stop_sms_forwarder()
+    luci.sys.call("sleep 1")
+    fs.remove("/tmp/smstrun-AK68.lock")
+    return luci.sys.call("nohup python3 /usr/bin/smstrun-AK68.py >/tmp/smstrun-AK68.log 2>&1 &") == 0
+end
+
+local function sms_text_length(value)
+    local position, count = 1, 0
+    while position <= #value do
+        local first = value:byte(position)
+        local width
+        if first < 0x80 then
+            if first < 32 and first ~= 9 and first ~= 10 and first ~= 13 then
+                return nil, "短信内容包含不支持的控制字符。"
+            end
+            width = 1
+        elseif first >= 0xC2 and first <= 0xDF then
+            width = 2
+        elseif first >= 0xE0 and first <= 0xEF then
+            width = 3
+        else
+            return nil, "暂不支持表情符号等四字节 Unicode 字符。"
+        end
+        for offset = 1, width - 1 do
+            local continuation = value:byte(position + offset)
+            if not continuation or continuation < 0x80 or continuation > 0xBF then
+                return nil, "短信内容不是有效的 UTF-8 文本。"
+            end
+        end
+        count = count + 1
+        position = position + width
+    end
+    return count
+end
+
+local function normalize_phone_number(value)
+    local number = trim(value)
+    local explicit_international = number:sub(1, 1) == "+" or number:sub(1, 2) == "00"
+    number = number:gsub("[%s%-%(%)]", "")
+    number = number:gsub("^%+", ""):gsub("^00", "")
+    if not number:match("^%d+$") or #number < 5 or #number > 20 then
+        return nil, "请输入 5～20 位有效电话号码。"
+    end
+    -- PDU 编码器使用国际号码类型（TON=91）。国内号码和 10010 等
+    -- 短服务号码必须补 86；显式使用 “+” 或 “00” 时按国际号码处理。
+    if not explicit_international and #number <= 11 and number:sub(1, 2) ~= "86" then
+        number = "86" .. number
+    end
+    return number
+end
+
 function action_smscs()
     luci.http.prepare_content("application/json")
     local operation = luci.http.formvalue("op") or "list"
@@ -400,6 +435,32 @@ function action_smscs()
             result.warning = table.concat(result.errors, "；")
         end
         luci.http.write_json(result)
+        return
+    end
+
+    if operation == "sent_history" then
+        luci.http.write_json({ success = true, records = sent_history() })
+        return
+    end
+
+    if operation == "forward_status" then
+        local token = trim(fs.readfile(SMS_FORWARD_TOKEN) or "")
+        local title = trim(fs.readfile(SMS_FORWARD_TITLE) or "")
+        local pids = luci.sys.exec("pgrep -f '^python3 /usr/bin/smstrun-AK68.py$'") or ""
+        luci.http.write_json({
+            success = true,
+            enabled = token ~= "",
+            running = pids:match("%d+") ~= nil,
+            token_configured = token ~= "",
+            title = title
+        })
+        return
+    end
+
+    if operation == "forward_history" then
+        local history = fs.readfile("/tmp/smstrunsum-AK68.conf") or ""
+        if #history > 65536 then history = history:sub(-65536) end
+        luci.http.write_json({ success = true, history = history })
         return
     end
 
@@ -428,6 +489,89 @@ function action_smscs()
             luci.http.write_json({ success = false, error = "没有可删除的短信编号。" })
             return
         end
+    elseif operation == "send" then
+        local number, number_error = normalize_phone_number(luci.http.formvalue("number"))
+        local message = luci.http.formvalue("message") or ""
+        local length, content_error = sms_text_length(message)
+        local success, error_message = false, number_error or content_error
+
+        if not error_message and (not length or length == 0 or message:match("^%s*$")) then
+            error_message = "短信内容不能为空。"
+        elseif not error_message and length > 500 then
+            error_message = "短信内容不能超过 500 个字符。"
+        end
+
+        if not error_message then
+            local util = require "luci.util"
+            local encode_command = "lua /usr/bin/pdul-AK68.lua '' " ..
+                util.shellquote(number) .. " " .. util.shellquote(message) .. " 2>&1"
+            local encoded = (luci.sys.exec(encode_command) or ""):gsub("%s+", "")
+            local hex_only, separators = encoded:gsub("\\r", "")
+            if separators == 0 or hex_only == "" or not hex_only:match("^[0-9A-Fa-f]+$") then
+                error_message = "短信 PDU 编码失败。"
+            else
+                local mode_result = atsd_command("AT+CMGF=0")
+                if mode_result:upper():find("ERROR", 1, true) then
+                    error_message = "模组无法进入 PDU 短信模式。"
+                else
+                    local modem_info = atsd_command("ATI")
+                    local payload = modem_info:find("V100", 1, true) and
+                        encoded:gsub("\\r", ">") or encoded
+                    local output = atsd_command("AT+CMGS=" .. payload)
+                    success = output:find("OK", 1, true) ~= nil and
+                        output:upper():find("ERROR", 1, true) == nil
+                    if not success then error_message = "模组未接受短信发送请求。" end
+                end
+            end
+        end
+
+        local record = {
+            time = os.date("%Y-%m-%d %H:%M:%S"),
+            number = number or trim(luci.http.formvalue("number")),
+            content = message,
+            success = success,
+            error = success and nil or error_message
+        }
+        append_sent_history(record)
+        modem_log("短信", success and "已提交给模组" or "发送失败：" .. (error_message or "未知错误"))
+        luci.http.write_json({ success = success, error = error_message, record = record })
+        return
+    elseif operation == "sent_clear" then
+        fs.remove(SMS_SENT_HISTORY)
+        luci.http.write_json({ success = true })
+        return
+    elseif operation == "forward_save" then
+        local token = trim(luci.http.formvalue("forward_token"))
+        local current_token = trim(fs.readfile(SMS_FORWARD_TOKEN) or "")
+        local title = trim(luci.http.formvalue("forward_title"))
+        if token == "" then token = current_token end
+        if token == "" then
+            luci.http.write_json({ success = false, error = "请填写 PushPlus Token。" })
+            return
+        end
+        if #token > 256 or token:find("[^%w_%-]") then
+            luci.http.write_json({ success = false, error = "PushPlus Token 格式无效。" })
+            return
+        end
+        if title == "" or #title > 120 or title:find("[\r\n]") then
+            luci.http.write_json({ success = false, error = "转发标题不能为空且不能超过 120 字节。" })
+            return
+        end
+        fs.writefile(SMS_FORWARD_TOKEN, token .. "\n")
+        fs.writefile(SMS_FORWARD_TITLE, title .. "\n")
+        fs.chmod(SMS_FORWARD_TOKEN, "0600")
+        fs.chmod(SMS_FORWARD_TITLE, "0600")
+        local started = start_sms_forwarder()
+        modem_log("短信转发", "转发设置已更新")
+        luci.http.write_json({ success = started, error = started and nil or "短信转发服务启动失败。" })
+        return
+    elseif operation == "forward_disable" then
+        fs.writefile(SMS_FORWARD_TOKEN, "")
+        fs.chmod(SMS_FORWARD_TOKEN, "0600")
+        stop_sms_forwarder()
+        modem_log("短信转发", "转发开关 -> 关闭")
+        luci.http.write_json({ success = true })
+        return
     else
         luci.http.write_json({ success = false, error = "不支持的短信操作。" })
         return
