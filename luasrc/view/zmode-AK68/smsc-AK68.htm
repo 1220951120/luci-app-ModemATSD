@@ -38,6 +38,65 @@
     .sms-grid { grid-template-columns:1fr; }
     .sms-grid .sms-grid-actions { grid-column:1; }
     .sms-card { padding:12px; }
+    #sms-inbox .sms-table-wrap { overflow:visible; }
+    #sms-inbox-table { border:0; }
+    #sms-inbox-table thead { display:none; }
+    #sms-inbox-table tbody,
+    #sms-inbox-table tr,
+    #sms-inbox-table td {
+        box-sizing:border-box;
+        display:block;
+        width:100%;
+    }
+    #sms-inbox-table tr {
+        margin-bottom:12px;
+        overflow:hidden;
+        border:1px solid #ccc;
+        border-radius:6px;
+        background:rgba(255,255,255,.25);
+    }
+    #sms-inbox-table td {
+        min-width:0;
+        padding:8px 10px;
+        border:0;
+        border-bottom:1px solid #ddd;
+        white-space:normal;
+    }
+    #sms-inbox-table td::before {
+        margin-right:6px;
+        color:#666;
+        font-weight:600;
+    }
+    #sms-inbox-table td:nth-child(1)::before { content:"发件人："; }
+    #sms-inbox-table td:nth-child(2)::before { content:"时间："; }
+    #sms-inbox-table td:nth-child(3)::before {
+        display:block;
+        margin:0 0 6px;
+        content:"短信内容";
+    }
+    #sms-inbox-table td:nth-child(3) {
+        line-height:1.55;
+        overflow-wrap:break-word;
+        word-break:normal;
+        white-space:pre-wrap;
+    }
+    #sms-inbox-table .sms-action-cell {
+        display:flex;
+        width:100%;
+        min-width:0;
+        align-items:center;
+        justify-content:space-between;
+        border-bottom:0;
+        text-align:left;
+    }
+    #sms-inbox-table .sms-action-cell::before { content:"操作："; }
+    #sms-inbox-table .sms-empty-cell {
+        display:block;
+        padding:16px 10px;
+        border:0;
+        text-align:center;
+    }
+    #sms-inbox-table .sms-empty-cell::before { content:none; }
 }
 </style>
 
@@ -150,7 +209,7 @@
     function emptyTable(body, text, columns) {
         body.textContent = '';
         var row = document.createElement('tr');
-        var cell = appendCell(row, text);
+        var cell = appendCell(row, text, 'sms-empty-cell');
         cell.colSpan = columns;
         body.appendChild(row);
     }
