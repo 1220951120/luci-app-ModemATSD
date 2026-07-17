@@ -319,7 +319,6 @@ if refresh_interval ~= 10 and refresh_interval ~= 15 and refresh_interval ~= 30 
         });   
         XHR.poll(<%=refresh_interval%>, '<%=luci.dispatcher.build_url("admin", "modem-AK68", "get_csq")%>', null,
             function(x, rv) {
-                updateElement('last_refresh', new Date().toLocaleString());
                 updateElement('stsss', rv.stsss);
                 updateElement('modem', rv.modem);
                 updateElement('conntype', rv.conntype);
@@ -496,7 +495,6 @@ if refresh_interval ~= 10 and refresh_interval ~= 15 and refresh_interval ~= 30 
             <tr><td width="23%"><%:固件版本 %></td><td id="firmware"></td><td></td></tr>
             <tr><td width="23%"><%:设备温度 %></td><td id="temper"></td><td></td></tr>
             <tr><td width="23%"><%:本次数据采集时间 %></td><td id="date"></td><td></td></tr>
-            <tr><td width="23%"><%:页面更新时间 %></td><td id="last_refresh">-</td><td>轮询间隔：<%=refresh_interval%>秒</td></tr>
         </table>
     </fieldset>
     <fieldset class="cbi-section" id="cbi-msinfo">

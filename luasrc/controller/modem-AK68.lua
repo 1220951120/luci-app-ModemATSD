@@ -590,24 +590,25 @@ end
 -----------------------------------------------------------------------------------
 ------------获取信号状态
 function action_get_csq()
-    local conf_file_path = "/tmp/modconf-AK68.conf"
-    local conf_file = io.open(conf_file_path, "r")
-    local modem_type = nil
+    luci.http.prepare_content("application/json")
 
-    if conf_file then
-        modem_type = conf_file:read("*line")
-        conf_file:close()
+    local modem_type = fs.readfile("/tmp/modconf-AK68.conf") or ""
+    local status_script
+
+    if modem_type:find("RM520", 1, true) or modem_type:find("NU313", 1, true) then
+        status_script = "/usr/share/modem-AK68/zinfo-AK68.sh"
+    elseif modem_type:find("MT5700", 1, true) then
+        status_script = "/usr/share/modem-AK68/zinfo5700-AK68.sh"
     else
-        error("Unable to open configuration file: " .. conf_file_path)
+        luci.http.status(503, "Service Unavailable")
+        luci.http.write_json({ error = "无法识别模组类型，暂时不能读取状态。" })
+        return
     end
 
-    if modem_type:find("RM520") then
-        io.popen("/usr/share/modem-AK68/zinfo-AK68.sh")
-    elseif modem_type:find("MT5700") then
-        io.popen("/usr/share/modem-AK68/zinfo5700-AK68.sh")
-    else
-        error("Unsupported modem type")
-    end
+    -- Wait for this collection to finish before reading the cache file.
+    -- The old io.popen() call returned immediately, so the first response
+    -- after opening the page contained data left by the previous collection.
+    local refresh_result = luci.sys.call(status_script .. " >/dev/null 2>&1")
 
     local file, file2
     local stat = "/tmp/cpe_cell-AK68.file"
@@ -617,7 +618,13 @@ function action_get_csq()
     file2 = io.open(stat2, "r")
 
     if not file or not file2 then
-        error("Error opening status files.")
+        if file then file:close() end
+        if file2 then file2:close() end
+        luci.http.status(503, "Service Unavailable")
+        luci.http.write_json({
+            error = refresh_result == 0 and "模组状态文件尚未生成。" or "模组状态采集失败。"
+        })
+        return
     end
 
     local rv = {}
@@ -663,6 +670,5 @@ function action_get_csq()
 	--------------------------------
 	file:close()
     	file2:close()
-	luci.http.prepare_content("application/json")
 	luci.http.write_json(rv)
 end
