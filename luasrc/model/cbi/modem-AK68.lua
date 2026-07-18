@@ -248,32 +248,27 @@ smode:value("0", translate("自动"))
 smode:value("1", translate("4G网络"))
 smode:value("2", translate("5G网络"))
 
-local function validate_schedule_time(self, value)
-    local hour, minute = value:match("^(%d%d):(%d%d)$")
-    if not hour or tonumber(hour) > 23 or tonumber(minute) > 59 then
-        return nil, translate("请输入 HH:MM 格式的有效时间，例如 23:00")
+local lock_schedule_enable = section:taboption("advanced", Flag, "lock_schedule_enable",
+    translate("启用分时锁网"),
+    translate("按时间段切换 LTE 或 5G-SA 的频段、EARFCN 和小区锁定。未命中任何规则时使用自动网络；相邻时间段会直接切换，不会在边界先触发自动网络。"))
+lock_schedule_enable.default = "0"
+lock_schedule_enable.rmempty = false
+log_flag(lock_schedule_enable, "分时锁网")
+
+local lock_schedule_rules = section:taboption("advanced", Value, "lock_schedule_rules", translate("分时锁网规则"))
+lock_schedule_rules.template = "zmode-AK68/lock-schedule-AK68"
+lock_schedule_rules.rmempty = true
+lock_schedule_rules:depends("lock_schedule_enable", "1")
+lock_schedule_rules.validate = function(self, value)
+    value = value or ""
+    local util = require "luci.util"
+    local result = luci.sys.exec("/usr/bin/modem-auto-schedule-AK68.sh --validate " .. util.shellquote(value) .. " 2>&1") or ""
+    result = result:gsub("^%s+", ""):gsub("%s+$", "")
+    if result == "OK" then
+        return value
     end
-    return value
+    return nil, result ~= "" and result or translate("分时锁网规则校验失败")
 end
-
-local auto_schedule_enable = section:taboption("advanced", Flag, "auto_schedule_enable",
-    translate("定时恢复自动网络"),
-    translate("在指定时间段内临时使用自动网络制式，并解除频段、频点和小区锁定；时间段结束后恢复保存的网络与锁定设置。支持跨午夜。"))
-auto_schedule_enable.default = "0"
-auto_schedule_enable.rmempty = false
-log_flag(auto_schedule_enable, "定时恢复自动网络")
-
-local auto_schedule_start = section:taboption("advanced", Value, "auto_schedule_start", translate("自动模式开始时间"))
-auto_schedule_start.default = "02:00"
-auto_schedule_start.placeholder = "02:00"
-auto_schedule_start:depends("auto_schedule_enable", "1")
-auto_schedule_start.validate = validate_schedule_time
-
-local auto_schedule_end = section:taboption("advanced", Value, "auto_schedule_end", translate("自动模式结束时间"))
-auto_schedule_end.default = "06:00"
-auto_schedule_end.placeholder = "06:00"
-auto_schedule_end:depends("auto_schedule_enable", "1")
-auto_schedule_end.validate = validate_schedule_time
 
 nrmode = section:taboption("advanced", ListValue, "nrmode", translate("5G模式"))
 nrmode:value("0", translate("SA/NSA双模"))

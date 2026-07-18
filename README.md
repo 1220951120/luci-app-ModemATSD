@@ -89,15 +89,22 @@ rm -f /tmp/luci-indexcache /tmp/luci-modulecache
 
 ## 测试
 
-短信 PDU 解析测试可在源码树中运行：
+短信 PDU 与分时锁网调度测试可在源码树中运行：
 
 ```sh
-python3 -m unittest tests/test_sms_pdu_AK68.py
+python3 -m unittest discover -s tests -v
 ```
 
 测试样本均为合成数据，不应提交真实手机号、短信内容、PushPlus Token 或设备备份文件。
 
 ## 近期改进
+
+### 2.9-r22
+
+- 将单一的“定时恢复自动网络”扩展为最多 8 条分时锁网规则，支持 LTE/5G-SA 锁频段以及锁 EARFCN/PCI。
+- 未命中规则的时间自动解锁并恢复自动网络；相邻时间段在边界直接切换，不会中间触发自动网络。
+- 新增紧凑的规则表格和折叠编辑区，支持跨午夜、重叠校验和移动端布局。
+- 旧的 `auto_schedule_*` 配置不再读取且不自动迁移，升级后需要在高级设置中重新启用并添加分时锁网规则。
 
 ### 2.9-r21
 
