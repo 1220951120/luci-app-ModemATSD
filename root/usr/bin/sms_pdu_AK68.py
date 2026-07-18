@@ -311,6 +311,8 @@ def query_modem(status):
     )
     if process.returncode != 0:
         raise RuntimeError(f"读取短信失败（退出码 {process.returncode}）")
+    if not re.search(r"(?:^|[\r\n])\s*OK\s*(?:[\r\n]|$)", process.stdout):
+        raise RuntimeError("读取短信失败（模组未返回 OK）")
     return process.stdout
 
 

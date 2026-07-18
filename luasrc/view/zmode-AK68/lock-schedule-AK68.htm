@@ -7,7 +7,7 @@ local state_text = translate("调度尚未执行")
 local active_index = state:match("^rule:(%d+),")
 if active_index then
     state_text = translate("当前执行规则") .. " " .. active_index
-elseif state:match("^schedule%-auto") then
+elseif state:match("^schedule%-auto") or state == "schedule-disabled-auto" then
     state_text = translate("当前使用自动网络")
 end
 local manager_id = cbid .. ".manager"
@@ -103,12 +103,24 @@ local manager_id = cbid .. ".manager"
                 <input type="time" data-field="end" value="01:00" />
             </div>
             <div class="atsd-schedule-field">
+                <label><%:网络制式%></label>
+                <select data-field="network">
+                    <option value="nr_sa"><%:5G-SA（锁 5G）%></option>
+                    <option value="lte"><%:LTE（锁 4G）%></option>
+                </select>
+            </div>
+            <div class="atsd-schedule-field">
                 <label><%:锁网类型%></label>
-                <select data-field="type">
-                    <option value="nr_sa_cell"><%:5G-SA 锁频点/小区%></option>
-                    <option value="nr_sa_band"><%:5G-SA 仅锁频段%></option>
-                    <option value="lte_cell"><%:LTE 锁频点/小区%></option>
-                    <option value="lte_band"><%:LTE 仅锁频段%></option>
+                <select data-field="lock-type">
+                    <option value="cell"><%:锁频点和小区%></option>
+                    <option value="band"><%:仅锁频段%></option>
+                </select>
+            </div>
+            <div class="atsd-schedule-field">
+                <label><%:小区重选与切换%></label>
+                <select data-field="mobility">
+                    <option value="0"><%:禁止重选与切换%></option>
+                    <option value="1"><%:允许重选与切换%></option>
                 </select>
             </div>
             <div class="atsd-schedule-field">
@@ -131,7 +143,7 @@ local manager_id = cbid .. ".manager"
     </div>
 
     <div class="atsd-schedule-note">
-        <%:最多 8 条，支持跨午夜。已启用的规则不能重叠；相邻规则在共用边界会直接切换。编辑完成后请点击页面底部的“保存并应用”。%>
+        <%:最多 8 条，支持跨午夜；00:00 到 00:00 表示全天。已启用的规则不能重叠，相邻规则在共用边界会直接切换。未命中规则或关闭分时锁网时恢复自动网络。编辑完成后请点击页面底部的“保存并应用”。%>
     </div>
 </div>
 
@@ -143,11 +155,14 @@ local manager_id = cbid .. ".manager"
 
     var tbody = root.querySelector('[data-role="rules"]');
     var empty = root.querySelector('[data-role="empty"]');
+    var stateNode = root.querySelector('.atsd-schedule-state');
     var editor = root.querySelector('[data-role="editor"]');
     var enabledInput = root.querySelector('[data-field="enabled"]');
     var startInput = root.querySelector('[data-field="start"]');
     var endInput = root.querySelector('[data-field="end"]');
-    var typeInput = root.querySelector('[data-field="type"]');
+    var networkInput = root.querySelector('[data-field="network"]');
+    var lockTypeInput = root.querySelector('[data-field="lock-type"]');
+    var mobilityInput = root.querySelector('[data-field="mobility"]');
     var bandInput = root.querySelector('[data-field="band"]');
     var earfcnInput = root.querySelector('[data-field="earfcn"]');
     var pciInput = root.querySelector('[data-field="pci"]');
@@ -155,12 +170,8 @@ local manager_id = cbid .. ".manager"
     var editingIndex = -1;
     var rules = [];
 
-    var typeLabels = {
-        nr_sa_cell: '5G-SA 锁频点/小区',
-        nr_sa_band: '5G-SA 仅锁频段',
-        lte_cell: 'LTE 锁频点/小区',
-        lte_band: 'LTE 仅锁频段'
-    };
+    var networkLabels = { nr_sa: '5G-SA', lte: 'LTE' };
+    var lockLabels = { cell: '锁频点/小区', band: '仅锁频段' };
     var bands = {
         nr: ['1', '3', '5', '8', '28', '41', '78', '79'],
         lte: ['1', '3', '5', '8', '34', '38', '39', '40', '41']
@@ -170,15 +181,16 @@ local manager_id = cbid .. ".manager"
         if (!value) return [];
         return value.split(';').map(function(record) {
             var fields = record.split(',');
-            if (fields.length !== 7) return null;
+            if (fields.length !== 8) return null;
             return {
                 enabled: fields[0] === '1',
                 start: fields[1],
                 end: fields[2],
                 type: fields[3],
-                band: fields[4],
-                earfcn: fields[5],
-                pci: fields[6]
+                mobility: fields[4],
+                band: fields[5],
+                earfcn: fields[6],
+                pci: fields[7]
             };
         }).filter(function(rule) { return rule !== null; });
     }
@@ -186,7 +198,7 @@ local manager_id = cbid .. ".manager"
     function serializeRules() {
         input.value = rules.map(function(rule) {
             return [rule.enabled ? '1' : '0', rule.start, rule.end, rule.type,
-                rule.band, rule.earfcn, rule.pci].join(',');
+                rule.mobility, rule.band, rule.earfcn, rule.pci].join(',');
         }).join(';');
         if (document.createEvent) {
             var event = document.createEvent('HTMLEvents');
@@ -206,6 +218,7 @@ local manager_id = cbid .. ".manager"
     function intervals(rule) {
         var start = minuteValue(rule.start);
         var end = minuteValue(rule.end);
+        if (start === 0 && end === 0) return [[0, 1440]];
         if (start < end) return [[start, end]];
         return [[start, 1440], [0, end]];
     }
@@ -235,10 +248,15 @@ local manager_id = cbid .. ".manager"
     }
 
     function strategyText(rule) {
+        var parts = rule.type.split('_');
+        var lockType = parts.pop();
+        var network = parts.join('_');
         var prefix = rule.type.indexOf('nr_') === 0 ? 'N' : 'B';
-        var text = (typeLabels[rule.type] || rule.type) + ' / ' + prefix + rule.band;
+        var text = (networkLabels[network] || network) + ' / ' +
+            (lockLabels[lockType] || lockType) + ' / ' + prefix + rule.band;
         if (rule.type.indexOf('_cell') > 0)
             text += ' / EARFCN ' + rule.earfcn + ' / PCI ' + rule.pci;
+        text += rule.mobility === '1' ? ' / 允许重选' : ' / 禁止重选';
         return text;
     }
 
@@ -280,11 +298,15 @@ local manager_id = cbid .. ".manager"
     }
 
     function isCellType() {
-        return typeInput.value.indexOf('_cell') > 0;
+        return lockTypeInput.value === 'cell';
+    }
+
+    function combinedType() {
+        return networkInput.value + '_' + lockTypeInput.value;
     }
 
     function updateTypeFields(preferredBand) {
-        var isNr = typeInput.value.indexOf('nr_') === 0;
+        var isNr = networkInput.value === 'nr_sa';
         var available = isNr ? bands.nr : bands.lte;
         bandInput.innerHTML = '';
         available.forEach(function(value) {
@@ -304,12 +326,16 @@ local manager_id = cbid .. ".manager"
         editingIndex = index;
         var rule = index >= 0 ? rules[index] : {
             enabled: true, start: '07:00', end: '01:00', type: 'nr_sa_cell',
-            band: '78', earfcn: '', pci: ''
+            mobility: '0', band: '78', earfcn: '', pci: ''
         };
+        var parts = rule.type.split('_');
+        var lockType = parts.pop();
         enabledInput.checked = rule.enabled;
         startInput.value = rule.start;
         endInput.value = rule.end;
-        typeInput.value = rule.type;
+        networkInput.value = parts.join('_');
+        lockTypeInput.value = lockType;
+        mobilityInput.value = rule.mobility;
         updateTypeFields(rule.band);
         earfcnInput.value = rule.earfcn === '0' ? '' : rule.earfcn;
         pciInput.value = rule.pci === '0' && rule.type.indexOf('_band') > 0 ? '' : rule.pci;
@@ -330,15 +356,15 @@ local manager_id = cbid .. ".manager"
             window.alert('请输入有效的开始和结束时间。');
             return;
         }
-        if (startMinute === endMinute) {
-            window.alert('开始和结束时间不能相同。');
+        if (startMinute === endMinute && start !== '00:00') {
+            window.alert('只有 00:00 到 00:00 可以表示全天。');
             return;
         }
 
         var cellType = isCellType();
         var earfcn = cellType ? Number(earfcnInput.value) : 0;
         var pci = cellType ? Number(pciInput.value) : 0;
-        var maxPci = typeInput.value.indexOf('nr_') === 0 ? 1007 : 503;
+        var maxPci = networkInput.value === 'nr_sa' ? 1007 : 503;
         if (cellType && (!Number.isInteger(earfcn) || earfcn <= 0)) {
             window.alert('EARFCN 必须是大于 0 的整数。');
             return;
@@ -352,7 +378,8 @@ local manager_id = cbid .. ".manager"
             enabled: enabledInput.checked,
             start: start,
             end: end,
-            type: typeInput.value,
+            type: combinedType(),
+            mobility: mobilityInput.value,
             band: bandInput.value,
             earfcn: String(earfcn),
             pci: String(pci)
@@ -374,12 +401,18 @@ local manager_id = cbid .. ".manager"
         closeEditor();
     }
 
+    var storedRecords = input.value ? input.value.split(';').filter(function(record) { return record !== ''; }) : [];
     rules = parseRules(input.value);
+    if (storedRecords.length !== rules.length) {
+        stateNode.textContent = '检测到旧版分时规则，请重新添加规则并保存。';
+        serializeRules();
+    }
     renderRules();
     root.querySelector('[data-action="add"]').addEventListener('click', function() { openEditor(-1); });
     root.querySelector('[data-action="cancel"]').addEventListener('click', closeEditor);
     root.querySelector('[data-action="save"]').addEventListener('click', saveEditor);
-    typeInput.addEventListener('change', function() { updateTypeFields(bandInput.value); });
+    networkInput.addEventListener('change', function() { updateTypeFields(bandInput.value); });
+    lockTypeInput.addEventListener('change', function() { updateTypeFields(bandInput.value); });
 })();
 </script>
 

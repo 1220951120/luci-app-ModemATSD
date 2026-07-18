@@ -40,36 +40,6 @@ local function get_module_type()
     return module_type
 end
 
-function update_rf_mode()
-    local uci = require "luci.model.uci".cursor()
-    local RF_Mode = uci:get("modem-AK68", "@ndis[0]", "smode") or "0"
-    local RF_Mode_file = "/tmp/RF_Mode-AK68"
-    local fs = require "nixio.fs"
-    local last_RF_Mode = fs.readfile(RF_Mode_file) or "-1"
-    if RF_Mode ~= last_RF_Mode then
-        local sys = require "luci.sys"
-        local command
-        if RF_Mode == "0" then
-            command = 'atsd_tools_cli -i cpe -c \'AT^SYSCFGEX="080302",2000000680380,1,2,1E200000095,,\''
-            sys.exec(command .. " >> /tmp/moduleInit-AK68")
-            fs.writefile("/tmp/moduleInit-AK68", "RF_Mode: " .. RF_Mode .. " 自动网络\n")
-        elseif RF_Mode == "1" then
-            command = 'atsd_tools_cli -i cpe -c \'AT^SYSCFGEX="03",2000000680380,1,2,1E200000095,,\''
-            sys.exec(command .. " >> /tmp/moduleInit-AK68")
-            fs.writefile("/tmp/moduleInit-AK68", "RF_Mode: " .. RF_Mode .. " 4G网络\n")
-        elseif RF_Mode == "2" then
-            command = 'atsd_tools_cli -i cpe -c \'AT^SYSCFGEX="08",2000000680380,1,2,1E200000095,,\''
-            sys.exec(command .. " >> /tmp/moduleInit-AK68")
-            sys.exec('atsd_tools_cli -i cpe -c \'AT^C5GOPTION=1,1,1\'')
-            fs.writefile("/tmp/moduleInit-AK68", "RF_Mode: " .. RF_Mode .. " 5G网络\n")
-        end
-        fs.writefile(RF_Mode_file, RF_Mode)
-    else
-        fs.writefile("/tmp/moduleInit-AK68", "RF_Mode未变动, 不执行操作\n")
-    end
-end
-
-
 -- 根据模块类型设置标题
 local module_type = get_module_type()
 if not module_type then
@@ -105,16 +75,9 @@ apnconfig = section:taboption("general", Value, "apnconfig", translate("APN配�
 apnconfig.rmempty = true
 
 
--------------------------------------------------
-smode = section:taboption("advanced", ListValue, "smode", translate("网络制式"))
-smode.default = "0"
-smode:value("0", translate("自动"))
-smode:value("1", translate("4G网络"))
-smode:value("2", translate("5G网络"))
-
 local lock_schedule_enable = section:taboption("advanced", Flag, "lock_schedule_enable",
     translate("启用分时锁网"),
-    translate("按时间段切换 LTE 或 5G-SA 的频段、EARFCN 和小区锁定。未命中任何规则时使用自动网络；相邻时间段会直接切换，不会在边界先触发自动网络。"))
+    translate("所有网络制式与锁网设置统一在分时规则中配置；00:00 到 00:00 表示全天锁网。未命中规则或关闭此功能时使用自动网络，相邻时间段会直接切换。"))
 lock_schedule_enable.default = "0"
 lock_schedule_enable.rmempty = false
 log_flag(lock_schedule_enable, "分时锁网")
@@ -168,107 +131,6 @@ function carrier_aggregation.write(self, section_id, value)
     luci.sys.call("atsd_tools_cli -i cpe -c 'AT+CFUN=1' >/dev/null 2>&1")
     modem_log("载波聚合", (value == "1" and "开启" or "关闭") .. "成功，已重启模组射频")
 end
-
-if (content and string.find(content, "RM520")) or (content and string.find(content, "RM500U")) then
-    nrmode = section:taboption("advanced", ListValue, "nrmode", translate("5G模式"))
-    nrmode:value("0", translate("SA/NSA双模"))
-    nrmode:value("1", translate("SA模式"))
-    nrmode:value("2", translate("NSA模式"))
-    nrmode:depends("smode","2")
-else
-    nrmode = section:taboption("advanced", ListValue, "nrmode", translate("5G模式"))
-    nrmode:value("1", translate("SA模式"))
-    nrmode:depends("smode","2")
-end
-
-
-bandlist_lte = section:taboption("advanced", ListValue, "bandlist_lte", translate("LTE频段"))
-bandlist_lte.default = "0"
-bandlist_lte:value("0", translate("自动"))
-bandlist_lte:value("1", translate("BAND 1"))
-bandlist_lte:value("3", translate("BAND 3"))
-bandlist_lte:value("5", translate("BAND 5"))
-bandlist_lte:value("8", translate("BAND 8"))
-bandlist_lte:value("34", translate("BAND 34"))
-bandlist_lte:value("38", translate("BAND 38"))
-bandlist_lte:value("39", translate("BAND 39"))
-bandlist_lte:value("40", translate("BAND 40"))
-bandlist_lte:value("41", translate("BAND 41"))
-bandlist_lte:depends("smode","1")
-
-bandlist_sa = section:taboption("advanced", ListValue, "bandlist_sa", translate("5G-SA频段"))
-bandlist_sa.default = "0"
-bandlist_sa:value("0", translate("自动"))
-bandlist_sa:value("1", translate("BAND 1"))
-bandlist_sa:value("3", translate("BAND 3"))
-bandlist_sa:value("5", translate("BAND 5"))
-bandlist_sa:value("8", translate("BAND 8"))
-bandlist_sa:value("28", translate("BAND 28"))
-bandlist_sa:value("41", translate("BAND 41"))
-bandlist_sa:value("78", translate("BAND 78"))
-bandlist_sa:value("79", translate("BAND 79"))
-bandlist_sa:depends("nrmode","1")
-
-
-if (content and string.find(content, "RM520")) or (content and string.find(content, "RM500U")) then
-bandlist_nsa = section:taboption("advanced", ListValue, "bandlist_nsa", translate("5G-NSA频段"))
-bandlist_nsa.default = "0"
-bandlist_nsa:value("0", translate("自动"))
-bandlist_nsa:value("41", translate("BAND 41"))
-bandlist_nsa:value("78", translate("BAND 78"))
-bandlist_nsa:value("79", translate("BAND 79"))
-bandlist_nsa:depends("nrmode","2")
-end
-
-
-earfcn = section:taboption("advanced", Value, "earfcn", translate("频点EARFCN"))
-earfcn:depends("bandlist_lte","1")
-earfcn:depends("bandlist_lte","3")
-earfcn:depends("bandlist_lte","5")
-earfcn:depends("bandlist_lte","8")
-earfcn:depends("bandlist_lte","34")
-earfcn:depends("bandlist_lte","38")
-earfcn:depends("bandlist_lte","39")
-earfcn:depends("bandlist_lte","40")
-earfcn:depends("bandlist_lte","41")
-
-earfcn:depends("bandlist_sa","1")
-earfcn:depends("bandlist_sa","3")
-earfcn:depends("bandlist_sa","5")
-earfcn:depends("bandlist_sa","8")
-earfcn:depends("bandlist_sa","28")
-earfcn:depends("bandlist_sa","41")
-earfcn:depends("bandlist_sa","78")
-earfcn:depends("bandlist_sa","79")
-
-earfcn:depends("bandlist_nsa","41")
-earfcn:depends("bandlist_nsa","78")
-earfcn:depends("bandlist_nsa","79")
-earfcn.rmempty = true
-
-cellid = section:taboption("advanced", Value, "cellid", translate("小区PCI"))
-cellid:depends("bandlist_lte","1")
-cellid:depends("bandlist_lte","3")
-cellid:depends("bandlist_lte","5")
-cellid:depends("bandlist_lte","8")
-cellid:depends("bandlist_lte","34")
-cellid:depends("bandlist_lte","38")
-cellid:depends("bandlist_lte","39")
-cellid:depends("bandlist_lte","40")
-cellid:depends("bandlist_lte","41")
-
-cellid:depends("bandlist_sa","1")
-cellid:depends("bandlist_sa","3")
-cellid:depends("bandlist_sa","5")
-cellid:depends("bandlist_sa","8")
-cellid:depends("bandlist_sa","28")
-cellid:depends("bandlist_sa","41")
-cellid:depends("bandlist_sa","78")
-cellid:depends("bandlist_sa","79")
-
-cellid:depends("bandlist_nsa","41")
-cellid:depends("bandlist_nsa","78")
-cellid:depends("bandlist_nsa","79")
 
 ------------------------------------------------------------------------------------
 luci.sys.exec("/usr/bin/LQXH-AK68.sh > /tmp/LQXH-AK68.file || echo '-' > /tmp/LQXH-AK68.file")--如果没有值要搞个-进去存着，不然这二逼LUA会报错
@@ -354,45 +216,9 @@ modify_imei11.cfgvalue = function()
     return render_signal("节点", 10)
 end
 modify_imei11:depends("enable_imei2", "1")
------------------------------------------------------------------------------------
-freqlock = section:taboption("advanced", Flag, "freqlock", translate("频点/小区锁定开关"),"设置后需要勾选开关才可以锁小区基站")
-freqlock:depends("bandlist_lte","1")
-freqlock:depends("bandlist_lte","3")
-freqlock:depends("bandlist_lte","5")
-freqlock:depends("bandlist_lte","8")
-freqlock:depends("bandlist_lte","34")
-freqlock:depends("bandlist_lte","38")
-freqlock:depends("bandlist_lte","39")
-freqlock:depends("bandlist_lte","40")
-freqlock:depends("bandlist_lte","41")
-
-freqlock:depends("bandlist_sa","1")
-freqlock:depends("bandlist_sa","3")
-freqlock:depends("bandlist_sa","5")
-freqlock:depends("bandlist_sa","8")
-freqlock:depends("bandlist_sa","28")
-freqlock:depends("bandlist_sa","41")
-freqlock:depends("bandlist_sa","78")
-freqlock:depends("bandlist_sa","79")
-
-freqlock:depends("bandlist_nsa","41")
-freqlock:depends("bandlist_nsa","78")
-freqlock:depends("bandlist_nsa","79")
-freqlock.rmempty = true
-log_flag(freqlock, "频点/小区锁定")
-
-cellid.rmempty = true
-
 dataroaming = section:taboption("advanced", Flag, "datarroaming", translate("国际漫游"),"适用于行动网路漫游的数据体验，可能会产生高昂的费用。")
 dataroaming.rmempty = true
 log_flag(dataroaming, "国际漫游")
-
-smode2 = section:taboption("advanced", ListValue, "smode2", translate("网络制式"))
-smode2.default = "0"
-smode2:value("0", translate("自动"))
-smode2:value("1", translate("4G网络"))
-smode2:value("2", translate("5G网络"))
-smode2:depends("switchNetwork","1")
 -----------------------------------------------------
 --sim_card_stat = section:taboption("general", DummyValue, "sim_card_stat", translate("SIM卡状态"))
 --sim_card_stat.value = luci.sys.exec("cat /tmp/simcardstat-AK68")
@@ -669,7 +495,6 @@ local sys = require "luci.sys"
 local file = io.open("/tmp/modconf-AK68.conf", "r")
 if apply then
     --function m.on_commit(map)
-        --update_rf_mode()
     --end
     if file then
         local content = file:read("*all")

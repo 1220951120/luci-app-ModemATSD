@@ -66,23 +66,26 @@ validate_rules() {
 			if (records[i] == "")
 				fail("规则 " i " 为空")
 			field_count = split(records[i], fields, ",")
-			if (field_count != 7)
+			if (field_count != 8)
 				fail("规则 " i " 格式错误")
 
 			enabled = fields[1]
 			start = valid_time(fields[2])
 			finish = valid_time(fields[3])
 			type = fields[4]
-			band = fields[5]
-			earfcn = fields[6]
-			pci = fields[7]
+			mobility = fields[5]
+			band = fields[6]
+			earfcn = fields[7]
+			pci = fields[8]
 
 			if (enabled != "0" && enabled != "1")
 				fail("规则 " i " 的启用状态无效")
 			if (start < 0 || finish < 0)
 				fail("规则 " i " 的时间必须为 HH:MM")
-			if (start == finish)
-				fail("规则 " i " 的开始和结束时间不能相同")
+			if (start == finish && fields[2] != "00:00")
+				fail("规则 " i " 只有 00:00 到 00:00 可表示全天")
+			if (mobility != "0" && mobility != "1")
+				fail("规则 " i " 的重选与切换设置无效")
 			if (band !~ /^[0-9]+$/ || earfcn !~ /^[0-9]+$/ || pci !~ /^[0-9]+$/)
 				fail("规则 " i " 的频段、EARFCN 和 PCI 必须为数字")
 
@@ -113,7 +116,8 @@ validate_rules() {
 
 			if (enabled == "1") {
 				minute = start
-				while (minute != finish) {
+				minutes_to_claim = start == finish ? 1440 : (finish - start + 1440) % 1440
+				for (claimed = 0; claimed < minutes_to_claim; claimed++) {
 					if (owner[minute] != "")
 						fail("规则 " i " 与规则 " owner[minute] " 的时间段重叠")
 					owner[minute] = i
@@ -129,7 +133,7 @@ validate_rules() {
 select_active_rule() {
 	local rules="$1"
 	local now_minutes="$2"
-	local remaining record enabled start end type band earfcn pci
+	local remaining record enabled start end type mobility band earfcn pci
 	local start_minutes end_minutes index old_ifs
 
 	remaining="$rules"
@@ -145,14 +149,15 @@ select_active_rule() {
 		IFS=,
 		set -- $record
 		IFS="$old_ifs"
-		[ "$#" -eq 7 ] || continue
+		[ "$#" -eq 8 ] || continue
 		enabled="$1"
 		start="$2"
 		end="$3"
 		type="$4"
-		band="$5"
-		earfcn="$6"
-		pci="$7"
+		mobility="$5"
+		band="$6"
+		earfcn="$7"
+		pci="$8"
 		[ "$enabled" = "1" ] || continue
 
 		start_minutes="$(time_to_minutes "$start")" || continue
@@ -163,7 +168,7 @@ select_active_rule() {
 			{ [ "$now_minutes" -ge "$start_minutes" ] || [ "$now_minutes" -lt "$end_minutes" ]; } || continue
 		fi
 
-		echo "$index,$enabled,$start,$end,$type,$band,$earfcn,$pci"
+		echo "$index,$enabled,$start,$end,$type,$mobility,$band,$earfcn,$pci"
 		return 0
 	done
 	return 1
@@ -216,13 +221,6 @@ apply_network_mode() {
 	esac
 }
 
-is_uint() {
-	case "$1" in
-		''|*[!0-9]*) return 1 ;;
-		*) return 0 ;;
-	esac
-}
-
 clear_network_locks() {
 	local modem_type result
 	modem_type="$(get_modem_type)" || return 1
@@ -246,106 +244,6 @@ clear_network_locks() {
 	return "$result"
 }
 
-restore_saved_lock() {
-	local modem_type mode band band_nsa nrmode freqlock earfcn cellid scs result lock_command
-
-	modem_type="$(get_modem_type)" || return 1
-	mode="$(uci -q get modem-AK68.@ndis[0].smode)"
-	freqlock="$(uci -q get modem-AK68.@ndis[0].freqlock)"
-	earfcn="$(uci -q get modem-AK68.@ndis[0].earfcn)"
-	cellid="$(uci -q get modem-AK68.@ndis[0].cellid)"
-
-	case "$modem_type:$mode" in
-		balong:0|quectel:0)
-			return 0
-			;;
-		balong:1)
-			band="$(uci -q get modem-AK68.@ndis[0].bandlist_lte)"
-			band="${band:-0}"
-			is_uint "$band" || return 1
-			[ "$band" -gt 0 ] || return 0
-			lock_command="AT^LTEFREQLOCK=3,0,1,\"$band\""
-			if [ "$freqlock" = "1" ]; then
-				is_uint "$earfcn" && is_uint "$cellid" && [ "$earfcn" -gt 0 ] && [ "$cellid" -gt 0 ] || return 1
-				lock_command="AT^LTEFREQLOCK=2,0,1,\"$band\",\"$earfcn\",\"$cellid\""
-			fi
-			send_at 'AT+CFUN=0' || return 1
-			sleep 2
-			result=0
-			send_at "$lock_command" || result=1
-			send_at 'AT+CFUN=1' || result=1
-			return "$result"
-			;;
-		balong:2)
-			band="$(uci -q get modem-AK68.@ndis[0].bandlist_sa)"
-			band="${band:-0}"
-			is_uint "$band" || return 1
-			[ "$band" -gt 0 ] || return 0
-			lock_command="AT^NRFREQLOCK=3,0,1,\"$band\""
-			if [ "$freqlock" = "1" ]; then
-				is_uint "$earfcn" && is_uint "$cellid" && [ "$earfcn" -gt 0 ] && [ "$cellid" -gt 0 ] || return 1
-				case "$band" in
-					1|2|3|5|7|8|12|20|25|28|66|71|75|76) scs=0 ;;
-					38|40|41|48|77|78|79) scs=1 ;;
-					257|258|260|261) scs=3 ;;
-					*) return 1 ;;
-				esac
-				lock_command="AT^NRFREQLOCK=2,0,1,\"$band\",\"$earfcn\",\"$scs\",\"$cellid\""
-			fi
-			send_at 'AT+CFUN=0' || return 1
-			sleep 2
-			result=0
-			send_at "$lock_command" || result=1
-			send_at 'AT+CFUN=1' || result=1
-			return "$result"
-			;;
-		quectel:1)
-			band="$(uci -q get modem-AK68.@ndis[0].bandlist_lte)"
-			band="${band:-0}"
-			is_uint "$band" || return 1
-			[ "$band" -gt 0 ] || band='1:3:5:8:34:38:39:40:41'
-			send_at "AT+QNWPREFCFG=\"lte_band\",$band" || return 1
-			[ "$freqlock" = "1" ] || return 0
-			is_uint "$earfcn" && is_uint "$cellid" && [ "$earfcn" -gt 0 ] && [ "$cellid" -gt 0 ] || return 1
-			send_at "AT+QNWLOCK=\"common/4g\",1,$cellid,$earfcn" && send_at 'AT+QNWLOCK="save_ctrl",1,1'
-			;;
-		quectel:2)
-			band="$(uci -q get modem-AK68.@ndis[0].bandlist_sa)"
-			band_nsa="$(uci -q get modem-AK68.@ndis[0].bandlist_nsa)"
-			nrmode="$(uci -q get modem-AK68.@ndis[0].nrmode)"
-			band="${band:-0}"
-			band_nsa="${band_nsa:-0}"
-			nrmode="${nrmode:-0}"
-			is_uint "$band" && is_uint "$band_nsa" && is_uint "$nrmode" || return 1
-			[ "$band" -gt 0 ] || band='1:3:8:28:41:78:79'
-			[ "$band_nsa" -gt 0 ] || band_nsa='41:78:79'
-			send_at "AT+QNWPREFCFG=\"nr5g_band\",$band" || return 1
-			send_at "AT+QNWPREFCFG=\"nsa_nr5g_band\",$band_nsa" || return 1
-			case "$nrmode" in
-				0) send_at 'AT+QNWPREFCFG="nr5g_disable_mode",0' || return 1 ;;
-				1) send_at 'AT+QNWPREFCFG="nr5g_disable_mode",2' || return 1 ;;
-				2) send_at 'AT+QNWPREFCFG="nr5g_disable_mode",1' || return 1 ;;
-				*) return 1 ;;
-			esac
-			[ "$freqlock" = "1" ] || return 0
-			is_uint "$earfcn" && is_uint "$cellid" && [ "$earfcn" -gt 0 ] && [ "$cellid" -gt 0 ] || return 1
-			case "$band" in *:*) return 1 ;; esac
-			case "$band" in
-				1|2|3|5|7|8|12|20|25|28|66|71|75|76) scs=0 ;;
-				38|40|41|48|77|78|79) scs=1 ;;
-				257|258|260|261) scs=3 ;;
-				*) return 1 ;;
-			esac
-			send_at "AT+QNWLOCK=\"common/5g\",$cellid,$earfcn,$scs,$band" &&
-				send_at 'AT+QNWLOCK="save_ctrl",1,1'
-			;;
-		*)
-			log_message "当前保存的网络模式没有可恢复的锁频/锁小区配置"
-			return 1
-			;;
-	esac
-}
-
 scs_for_band() {
 	case "$1" in
 		1|2|3|5|7|8|12|20|25|28|66|71|75|76) echo 0 ;;
@@ -357,22 +255,23 @@ scs_for_band() {
 
 apply_scheduled_rule() {
 	local active_rule="$1"
-	local index enabled start end type band earfcn pci modem_type mode scs
+	local index enabled start end type mobility band earfcn pci modem_type mode scs
 	local lock_command result old_ifs
 
 	old_ifs="$IFS"
 	IFS=,
 	set -- $active_rule
 	IFS="$old_ifs"
-	[ "$#" -eq 8 ] || return 1
+	[ "$#" -eq 9 ] || return 1
 	index="$1"
 	enabled="$2"
 	start="$3"
 	end="$4"
 	type="$5"
-	band="$6"
-	earfcn="$7"
-	pci="$8"
+	mobility="$6"
+	band="$7"
+	earfcn="$8"
+	pci="$9"
 	[ "$enabled" = "1" ] || return 1
 
 	modem_type="$(get_modem_type)" || {
@@ -390,17 +289,17 @@ apply_scheduled_rule() {
 
 	case "$modem_type:$type" in
 		balong:lte_band)
-			lock_command="AT^LTEFREQLOCK=3,0,1,\"$band\""
+			lock_command="AT^LTEFREQLOCK=3,$mobility,1,\"$band\""
 			;;
 		balong:lte_cell)
-			lock_command="AT^LTEFREQLOCK=2,0,1,\"$band\",\"$earfcn\",\"$pci\""
+			lock_command="AT^LTEFREQLOCK=2,$mobility,1,\"$band\",\"$earfcn\",\"$pci\""
 			;;
 		balong:nr_sa_band)
-			lock_command="AT^NRFREQLOCK=3,0,1,\"$band\""
+			lock_command="AT^NRFREQLOCK=3,$mobility,1,\"$band\""
 			;;
 		balong:nr_sa_cell)
 			scs="$(scs_for_band "$band")" || return 1
-			lock_command="AT^NRFREQLOCK=2,0,1,\"$band\",\"$earfcn\",\"$scs\",\"$pci\""
+			lock_command="AT^NRFREQLOCK=2,$mobility,1,\"$band\",\"$earfcn\",\"$scs\",\"$pci\""
 			;;
 		quectel:lte_band|quectel:lte_cell)
 			send_at "AT+QNWPREFCFG=\"lte_band\",$band" || return 1
@@ -444,13 +343,6 @@ enter_auto_mode() {
 	clear_network_locks && apply_network_mode 0
 }
 
-restore_saved_settings() {
-	local mode
-	mode="$(uci -q get modem-AK68.@ndis[0].smode)"
-	mode="${mode:-0}"
-	clear_network_locks && apply_network_mode "$mode" && restore_saved_lock
-}
-
 check_schedule() {
 	local enabled rules validation now_minutes state active_rule expected_state
 	enabled="$(uci -q get modem-AK68.@ndis[0].lock_schedule_enable)"
@@ -466,13 +358,12 @@ check_schedule() {
 	fi
 
 	if [ "$enabled" != "1" ]; then
-		case "$state" in
-		rule:*|schedule-auto*)
-			restore_saved_settings || return
-			log_message "分时锁网已关闭，已恢复高级设置中保存的网络与锁定设置"
-			;;
-		esac
-		rm -f "$STATE_FILE"
+		expected_state="schedule-disabled-auto"
+		if [ "$state" != "$expected_state" ]; then
+			enter_auto_mode || return
+			echo "$expected_state" > "$STATE_FILE"
+			log_message "分时锁网已关闭，已恢复自动网络并解除锁定"
+		fi
 		return
 	fi
 

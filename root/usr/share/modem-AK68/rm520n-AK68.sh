@@ -70,20 +70,22 @@
     Enable_IMEI=`uci -q get modem-AK68.@ndis[0].enable_imei` || Enable_IMEI=0
     #IMEI修改开关
 
-    RF_Mode=`uci -q get modem-AK68.@ndis[0].smode` || RF_Mode=0
+    # 网络制式和锁网只由分时锁网服务管理。初始化阶段统一回到自动网络，
+    # 防止升级前遗留的静态 UCI 锁网项再次覆盖当前分时规则。
+    RF_Mode=0
     #网络制式 0: Auto, 1: 4G, 2: 5G
-    NR_Mode=`uci -q get modem-AK68.@ndis[0].nrmode` || NR_Mode=0
+    NR_Mode=0
     #0: Auto, 1: SA, 2: NSA
-    Band_LTE=`uci -q get modem-AK68.@ndis[0].bandlist_lte` || Band_LTE=0
-    Band_SA=`uci -q get modem-AK68.@ndis[0].bandlist_sa` || Band_SA=0
-    Band_NSA=`uci -q get modem-AK68.@ndis[0].bandlist_nsa` || Band_NSA=0
+    Band_LTE=0
+    Band_SA=0
+    Band_NSA=0
     Enable_PING=`uci -q get modem-AK68.@ndis[0].pingen` || Enable_PING=0
     PING_Addr=`uci -q get modem-AK68.@ndis[0].pingaddr` || PING_Addr="119.29.29.29"
     PING_Count=`uci -q get modem-AK68.@ndis[0].count` || PING_Count=10
     #FCN CI LOCK
-    Earfcn=`uci -q get modem-AK68.@ndis[0].earfcn` || Earfcn=0
-    Cellid=` uci -q get modem-AK68.@ndis[0].cellid` || Cellid=0
-    Freqlock=` uci -q get modem-AK68.@ndis[0].freqlock` || Freqlock=0
+    Earfcn=0
+    Cellid=0
+    Freqlock=0
 
     if [ ${Enable_PING} == 1 ];then
         /usr/share/modem-AK68/pingCheck-AK68.sh &

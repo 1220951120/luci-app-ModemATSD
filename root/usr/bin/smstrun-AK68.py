@@ -1,9 +1,86 @@
+import json
 import os
 import time
 import requests
 from datetime import datetime
 
 import sms_pdu_AK68
+
+
+FORWARD_STATE_PATH = "/etc/modem-sms-forward-AK68.state"
+FORWARD_STATE_VERSION = 1
+MAX_SAVED_FINGERPRINTS = 4096
+
+
+def load_forward_state(path=FORWARD_STATE_PATH):
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            data = json.load(file)
+        if data.get("version") != FORWARD_STATE_VERSION:
+            raise ValueError("状态版本不受支持")
+
+        fingerprints = []
+        seen = set()
+        for value in data.get("fingerprints", []):
+            if not isinstance(value, str) or len(value) != 64:
+                continue
+            if value in seen:
+                continue
+            seen.add(value)
+            fingerprints.append(value)
+        return True, fingerprints[-MAX_SAVED_FINGERPRINTS:]
+    except FileNotFoundError:
+        return False, []
+    except Exception as error:
+        print(f"读取短信转发去重状态失败，将重新建立基线: {error}")
+        return False, []
+
+
+def save_forward_state(fingerprints, path=FORWARD_STATE_PATH):
+    temporary_path = f"{path}.tmp.{os.getpid()}"
+    data = {
+        "version": FORWARD_STATE_VERSION,
+        "fingerprints": list(fingerprints)[-MAX_SAVED_FINGERPRINTS:],
+    }
+    try:
+        with open(temporary_path, "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=True, separators=(",", ":"))
+            file.flush()
+            os.fsync(file.fileno())
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, path)
+        return True
+    except Exception as error:
+        print(f"保存短信转发去重状态失败: {error}")
+        try:
+            os.remove(temporary_path)
+        except FileNotFoundError:
+            pass
+        return False
+
+
+def remember_fingerprints(fingerprint_order, seen_fingerprints, fingerprints):
+    for fingerprint in fingerprints:
+        if fingerprint in seen_fingerprints:
+            continue
+        seen_fingerprints.add(fingerprint)
+        fingerprint_order.append(fingerprint)
+
+    overflow = len(fingerprint_order) - MAX_SAVED_FINGERPRINTS
+    if overflow > 0:
+        expired = fingerprint_order[:overflow]
+        del fingerprint_order[:overflow]
+        seen_fingerprints.difference_update(expired)
+
+
+def establish_forward_baseline(messages, fingerprint_order, seen_fingerprints, path=FORWARD_STATE_PATH):
+    for sms in messages:
+        remember_fingerprints(
+            fingerprint_order,
+            seen_fingerprints,
+            sms["fingerprints"],
+        )
+    return save_forward_state(fingerprint_order, path)
 
 
 def read_token_from_config():
@@ -70,13 +147,30 @@ def forward():
         token = read_token_from_config()
         print("Enjoy! 已完成测试并开启转发功能，重启后完成开机自启。")
         count = 0
-        seen_fingerprints = set()
-        initial_scan = True
+        state_initialized, fingerprint_order = load_forward_state()
+        seen_fingerprints = set(fingerprint_order)
         while True:
             try:
                 messages, errors = sms_pdu_AK68.read_messages("all")
                 for error in errors:
                     print(error)
+
+                # The first run only records what is already stored on the
+                # modem. This prevents package upgrades, service restarts, or
+                # a replaced/corrupt state file from forwarding the inbox as
+                # if every historical unread SMS had just arrived.
+                if not state_initialized:
+                    if establish_forward_baseline(
+                        messages,
+                        fingerprint_order,
+                        seen_fingerprints,
+                    ):
+                        state_initialized = True
+                        print(f"已建立短信转发基线，共记录 {len(fingerprint_order)} 个短信分段。")
+                    else:
+                        print("无法持久保存短信基线，本轮不会转发任何短信。")
+                    time.sleep(5)
+                    continue
 
                 forwarded = False
                 for sms in messages:
@@ -84,13 +178,6 @@ def forward():
                     if fingerprints.issubset(seen_fingerprints):
                         continue
 
-                    # On startup, forward only messages that were still unread.
-                    # During normal operation an unseen fingerprint is new even
-                    # if a LuCI refresh changed its modem status to "read" first.
-                    should_forward = not initial_scan or 0 in sms["statuses"]
-                    if not should_forward:
-                        seen_fingerprints.update(fingerprints)
-                        continue
                     if not sms["complete"]:
                         print(
                             "长短信尚未收全，等待剩余分段: "
@@ -100,12 +187,16 @@ def forward():
 
                     message = sms_pdu_AK68.format_message(sms)
                     if push_pushplus(message, token, read_title_from_config()):
-                        seen_fingerprints.update(fingerprints)
+                        remember_fingerprints(
+                            fingerprint_order,
+                            seen_fingerprints,
+                            sms["fingerprints"],
+                        )
+                        save_forward_state(fingerprint_order)
                         count += 1
                         write_summary_to_file(count, message)
                         forwarded = True
 
-                initial_scan = False
                 if not forwarded:
                     print("未检测到新消息，继续检测...")
             except Exception as e:

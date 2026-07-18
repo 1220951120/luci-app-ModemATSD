@@ -1,7 +1,6 @@
 config ndis
 	option enable '1'
 	option simsel '0'
-	option smode '0'
 	option lock_schedule_enable '0'
 	option carrier_aggregation '1'
 	option traffic_limit_enable '0'
@@ -11,8 +10,6 @@ config ndis
 	option led_schedule_off '23:00'
 	option led_schedule_on '07:00'
 	option status_refresh_interval '30'
-	option bandlist_lte '0'
-	option bandlist_nr '0'
 	option pingen '0'
 	option pingaddr '119.29.29.29'
 	option count '5'
