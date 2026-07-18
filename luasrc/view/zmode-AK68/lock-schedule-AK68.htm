@@ -1,0 +1,419 @@
+<%+cbi/valueheader%>
+<%
+local fs = require "nixio.fs"
+local stored_value = self:cfgvalue(section) or ""
+local state = (fs.readfile("/tmp/modem-auto-schedule-AK68.state") or ""):gsub("%s+$", "")
+local state_text = translate("调度尚未执行")
+local active_index = state:match("^rule:(%d+),")
+if active_index then
+    state_text = translate("当前执行规则") .. " " .. active_index
+elseif state:match("^schedule%-auto") or state == "schedule-disabled-auto" then
+    state_text = translate("当前使用自动网络")
+end
+local manager_id = cbid .. ".manager"
+%>
+
+<style>
+.atsd-schedule-manager { max-width: 100%; }
+.atsd-schedule-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    margin-bottom: .6rem;
+}
+.atsd-schedule-state { color: #666; font-size: .9em; }
+.atsd-schedule-scroll {
+    max-height: 16rem;
+    overflow: auto;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+.atsd-schedule-table { width: 100%; margin: 0; }
+.atsd-schedule-table th,
+.atsd-schedule-table td { padding: .45rem .55rem; vertical-align: middle; }
+.atsd-schedule-table th { position: sticky; top: 0; z-index: 1; background: #f5f5f5; }
+.atsd-schedule-table td:last-child { white-space: nowrap; text-align: right; }
+.atsd-schedule-off { opacity: .55; }
+.atsd-schedule-empty { padding: 1.1rem; text-align: center; color: #777; }
+.atsd-schedule-editor {
+    display: none;
+    margin-top: .7rem;
+    padding: .75rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: rgba(127, 127, 127, .06);
+}
+.atsd-schedule-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(8rem, 1fr));
+    gap: .65rem;
+}
+.atsd-schedule-field label { display: block; margin-bottom: .2rem; font-size: .88em; color: #555; }
+.atsd-schedule-field input:not([type="checkbox"]),
+.atsd-schedule-field select { width: 100%; box-sizing: border-box; }
+.atsd-schedule-actions { margin-top: .75rem; display: flex; gap: .5rem; justify-content: flex-end; }
+.atsd-schedule-note { margin-top: .55rem; color: #666; font-size: .88em; line-height: 1.55; }
+@media (max-width: 760px) {
+    .atsd-schedule-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .atsd-schedule-table th:nth-child(1), .atsd-schedule-table td:nth-child(1) { display: none; }
+    .atsd-schedule-table th, .atsd-schedule-table td { padding: .4rem; }
+}
+@media (max-width: 430px) {
+    .atsd-schedule-grid { grid-template-columns: 1fr; }
+    .atsd-schedule-toolbar { align-items: flex-start; }
+}
+</style>
+
+<input type="hidden" data-update="change"<%= attr("name", cbid) .. attr("id", cbid) .. attr("value", stored_value) %> />
+
+<div class="atsd-schedule-manager" id="<%=manager_id%>">
+    <div class="atsd-schedule-toolbar">
+        <span class="atsd-schedule-state"><%=pcdata(state_text)%></span>
+        <button type="button" class="cbi-button cbi-button-add" data-action="add"><%:添加规则%></button>
+    </div>
+
+    <div class="atsd-schedule-scroll">
+        <table class="table atsd-schedule-table">
+            <thead>
+                <tr>
+                    <th><%:状态%></th>
+                    <th><%:时间段%></th>
+                    <th><%:锁网策略%></th>
+                    <th><%:操作%></th>
+                </tr>
+            </thead>
+            <tbody data-role="rules"></tbody>
+        </table>
+        <div class="atsd-schedule-empty" data-role="empty"><%:尚未配置规则，启用后将全天使用自动网络。%></div>
+    </div>
+
+    <div class="atsd-schedule-editor" data-role="editor">
+        <div class="atsd-schedule-grid">
+            <div class="atsd-schedule-field">
+                <label><%:启用此规则%></label>
+                <label><input type="checkbox" data-field="enabled" checked="checked" /> <%:启用%></label>
+            </div>
+            <div class="atsd-schedule-field">
+                <label><%:开始时间（包含）%></label>
+                <input type="time" data-field="start" value="07:00" />
+            </div>
+            <div class="atsd-schedule-field">
+                <label><%:结束时间（不包含）%></label>
+                <input type="time" data-field="end" value="01:00" />
+            </div>
+            <div class="atsd-schedule-field">
+                <label><%:网络制式%></label>
+                <select data-field="network">
+                    <option value="nr_sa"><%:5G-SA（锁 5G）%></option>
+                    <option value="lte"><%:LTE（锁 4G）%></option>
+                </select>
+            </div>
+            <div class="atsd-schedule-field">
+                <label><%:锁网类型%></label>
+                <select data-field="lock-type">
+                    <option value="cell"><%:锁频点和小区%></option>
+                    <option value="band"><%:仅锁频段%></option>
+                </select>
+            </div>
+            <div class="atsd-schedule-field">
+                <label><%:小区重选与切换%></label>
+                <select data-field="mobility">
+                    <option value="0"><%:禁止重选与切换%></option>
+                    <option value="1"><%:允许重选与切换%></option>
+                </select>
+            </div>
+            <div class="atsd-schedule-field">
+                <label><%:频段%></label>
+                <select data-field="band"></select>
+            </div>
+            <div class="atsd-schedule-field" data-role="cell-field">
+                <label><%:频点 EARFCN%></label>
+                <input type="number" min="1" step="1" data-field="earfcn" placeholder="640000" />
+            </div>
+            <div class="atsd-schedule-field" data-role="cell-field">
+                <label><%:小区 PCI%></label>
+                <input type="number" min="0" max="1007" step="1" data-field="pci" placeholder="0-1007" />
+            </div>
+        </div>
+        <div class="atsd-schedule-actions">
+            <button type="button" class="cbi-button" data-action="cancel"><%:取消%></button>
+            <button type="button" class="cbi-button cbi-button-positive" data-action="save"><%:保存规则%></button>
+        </div>
+    </div>
+
+    <div class="atsd-schedule-note">
+        <%:最多 8 条，支持跨午夜；00:00 到 00:00 表示全天。已启用的规则不能重叠，相邻规则在共用边界会直接切换。未命中规则或关闭分时锁网时恢复自动网络。编辑完成后请点击页面底部的“保存并应用”。%>
+    </div>
+</div>
+
+<script type="text/javascript">
+(function() {
+    var root = document.getElementById('<%=manager_id%>');
+    var input = document.getElementById('<%=cbid%>');
+    if (!root || !input) return;
+
+    var tbody = root.querySelector('[data-role="rules"]');
+    var empty = root.querySelector('[data-role="empty"]');
+    var stateNode = root.querySelector('.atsd-schedule-state');
+    var editor = root.querySelector('[data-role="editor"]');
+    var enabledInput = root.querySelector('[data-field="enabled"]');
+    var startInput = root.querySelector('[data-field="start"]');
+    var endInput = root.querySelector('[data-field="end"]');
+    var networkInput = root.querySelector('[data-field="network"]');
+    var lockTypeInput = root.querySelector('[data-field="lock-type"]');
+    var mobilityInput = root.querySelector('[data-field="mobility"]');
+    var bandInput = root.querySelector('[data-field="band"]');
+    var earfcnInput = root.querySelector('[data-field="earfcn"]');
+    var pciInput = root.querySelector('[data-field="pci"]');
+    var cellFields = root.querySelectorAll('[data-role="cell-field"]');
+    var editingIndex = -1;
+    var rules = [];
+
+    var networkLabels = { nr_sa: '5G-SA', lte: 'LTE' };
+    var lockLabels = { cell: '锁频点/小区', band: '仅锁频段' };
+    var bands = {
+        nr: ['1', '3', '5', '8', '28', '41', '78', '79'],
+        lte: ['1', '3', '5', '8', '34', '38', '39', '40', '41']
+    };
+
+    function parseRules(value) {
+        if (!value) return [];
+        return value.split(';').map(function(record) {
+            var fields = record.split(',');
+            if (fields.length !== 8) return null;
+            return {
+                enabled: fields[0] === '1',
+                start: fields[1],
+                end: fields[2],
+                type: fields[3],
+                mobility: fields[4],
+                band: fields[5],
+                earfcn: fields[6],
+                pci: fields[7]
+            };
+        }).filter(function(rule) { return rule !== null; });
+    }
+
+    function serializeRules() {
+        input.value = rules.map(function(rule) {
+            return [rule.enabled ? '1' : '0', rule.start, rule.end, rule.type,
+                rule.mobility, rule.band, rule.earfcn, rule.pci].join(',');
+        }).join(';');
+        if (document.createEvent) {
+            var event = document.createEvent('HTMLEvents');
+            event.initEvent('change', true, false);
+            input.dispatchEvent(event);
+        }
+    }
+
+    function minuteValue(value) {
+        var match = /^(\d\d):(\d\d)$/.exec(value || '');
+        if (!match) return -1;
+        var hour = Number(match[1]);
+        var minute = Number(match[2]);
+        return hour <= 23 && minute <= 59 ? hour * 60 + minute : -1;
+    }
+
+    function intervals(rule) {
+        var start = minuteValue(rule.start);
+        var end = minuteValue(rule.end);
+        if (start === 0 && end === 0) return [[0, 1440]];
+        if (start < end) return [[start, end]];
+        return [[start, 1440], [0, end]];
+    }
+
+    function findOverlap(candidate, ignoredIndex) {
+        if (!candidate.enabled) return -1;
+        var a = intervals(candidate);
+        for (var i = 0; i < rules.length; i++) {
+            if (i === ignoredIndex || !rules[i].enabled) continue;
+            var b = intervals(rules[i]);
+            for (var x = 0; x < a.length; x++) {
+                for (var y = 0; y < b.length; y++) {
+                    if (a[x][0] < b[y][1] && b[y][0] < a[x][1]) return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    function makeButton(label, className, handler) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'cbi-button ' + className;
+        button.textContent = label;
+        button.addEventListener('click', handler);
+        return button;
+    }
+
+    function strategyText(rule) {
+        var parts = rule.type.split('_');
+        var lockType = parts.pop();
+        var network = parts.join('_');
+        var prefix = rule.type.indexOf('nr_') === 0 ? 'N' : 'B';
+        var text = (networkLabels[network] || network) + ' / ' +
+            (lockLabels[lockType] || lockType) + ' / ' + prefix + rule.band;
+        if (rule.type.indexOf('_cell') > 0)
+            text += ' / EARFCN ' + rule.earfcn + ' / PCI ' + rule.pci;
+        text += rule.mobility === '1' ? ' / 允许重选' : ' / 禁止重选';
+        return text;
+    }
+
+    function renderRules() {
+        tbody.innerHTML = '';
+        empty.style.display = rules.length ? 'none' : 'block';
+        for (var i = 0; i < rules.length; i++) {
+            (function(index) {
+                var rule = rules[index];
+                var row = document.createElement('tr');
+                if (!rule.enabled) row.className = 'atsd-schedule-off';
+
+                var stateCell = document.createElement('td');
+                stateCell.textContent = rule.enabled ? '启用' : '停用';
+                row.appendChild(stateCell);
+
+                var timeCell = document.createElement('td');
+                timeCell.textContent = rule.start + ' → ' + rule.end;
+                row.appendChild(timeCell);
+
+                var strategyCell = document.createElement('td');
+                strategyCell.textContent = strategyText(rule);
+                row.appendChild(strategyCell);
+
+                var actionCell = document.createElement('td');
+                actionCell.appendChild(makeButton('编辑', 'cbi-button-edit', function() { openEditor(index); }));
+                actionCell.appendChild(document.createTextNode(' '));
+                actionCell.appendChild(makeButton('删除', 'cbi-button-remove', function() {
+                    if (!window.confirm('确定删除规则 ' + (index + 1) + '？')) return;
+                    rules.splice(index, 1);
+                    serializeRules();
+                    renderRules();
+                    closeEditor();
+                }));
+                row.appendChild(actionCell);
+                tbody.appendChild(row);
+            })(i);
+        }
+    }
+
+    function isCellType() {
+        return lockTypeInput.value === 'cell';
+    }
+
+    function combinedType() {
+        return networkInput.value + '_' + lockTypeInput.value;
+    }
+
+    function updateTypeFields(preferredBand) {
+        var isNr = networkInput.value === 'nr_sa';
+        var available = isNr ? bands.nr : bands.lte;
+        bandInput.innerHTML = '';
+        available.forEach(function(value) {
+            var option = document.createElement('option');
+            option.value = value;
+            option.textContent = (isNr ? 'N' : 'BAND ') + value;
+            bandInput.appendChild(option);
+        });
+        bandInput.value = available.indexOf(preferredBand) >= 0 ? preferredBand : (isNr ? '78' : '3');
+        for (var i = 0; i < cellFields.length; i++)
+            cellFields[i].style.display = isCellType() ? 'block' : 'none';
+        pciInput.max = isNr ? '1007' : '503';
+        pciInput.placeholder = isNr ? '0-1007' : '0-503';
+    }
+
+    function openEditor(index) {
+        editingIndex = index;
+        var rule = index >= 0 ? rules[index] : {
+            enabled: true, start: '07:00', end: '01:00', type: 'nr_sa_cell',
+            mobility: '0', band: '78', earfcn: '', pci: ''
+        };
+        var parts = rule.type.split('_');
+        var lockType = parts.pop();
+        enabledInput.checked = rule.enabled;
+        startInput.value = rule.start;
+        endInput.value = rule.end;
+        networkInput.value = parts.join('_');
+        lockTypeInput.value = lockType;
+        mobilityInput.value = rule.mobility;
+        updateTypeFields(rule.band);
+        earfcnInput.value = rule.earfcn === '0' ? '' : rule.earfcn;
+        pciInput.value = rule.pci === '0' && rule.type.indexOf('_band') > 0 ? '' : rule.pci;
+        editor.style.display = 'block';
+    }
+
+    function closeEditor() {
+        editingIndex = -1;
+        editor.style.display = 'none';
+    }
+
+    function saveEditor() {
+        var start = startInput.value;
+        var end = endInput.value;
+        var startMinute = minuteValue(start);
+        var endMinute = minuteValue(end);
+        if (startMinute < 0 || endMinute < 0) {
+            window.alert('请输入有效的开始和结束时间。');
+            return;
+        }
+        if (startMinute === endMinute && start !== '00:00') {
+            window.alert('只有 00:00 到 00:00 可以表示全天。');
+            return;
+        }
+
+        var cellType = isCellType();
+        var earfcn = cellType ? Number(earfcnInput.value) : 0;
+        var pci = cellType ? Number(pciInput.value) : 0;
+        var maxPci = networkInput.value === 'nr_sa' ? 1007 : 503;
+        if (cellType && (!Number.isInteger(earfcn) || earfcn <= 0)) {
+            window.alert('EARFCN 必须是大于 0 的整数。');
+            return;
+        }
+        if (cellType && (!Number.isInteger(pci) || pci < 0 || pci > maxPci)) {
+            window.alert('PCI 必须是 0-' + maxPci + ' 之间的整数。');
+            return;
+        }
+
+        var candidate = {
+            enabled: enabledInput.checked,
+            start: start,
+            end: end,
+            type: combinedType(),
+            mobility: mobilityInput.value,
+            band: bandInput.value,
+            earfcn: String(earfcn),
+            pci: String(pci)
+        };
+        var overlap = findOverlap(candidate, editingIndex);
+        if (overlap >= 0) {
+            window.alert('该时间段与规则 ' + (overlap + 1) + ' 重叠，请调整时间边界。');
+            return;
+        }
+        if (editingIndex < 0 && rules.length >= 8) {
+            window.alert('最多只能配置 8 条规则。');
+            return;
+        }
+
+        if (editingIndex >= 0) rules[editingIndex] = candidate;
+        else rules.push(candidate);
+        serializeRules();
+        renderRules();
+        closeEditor();
+    }
+
+    var storedRecords = input.value ? input.value.split(';').filter(function(record) { return record !== ''; }) : [];
+    rules = parseRules(input.value);
+    if (storedRecords.length !== rules.length) {
+        stateNode.textContent = '检测到旧版分时规则，请重新添加规则并保存。';
+        serializeRules();
+    }
+    renderRules();
+    root.querySelector('[data-action="add"]').addEventListener('click', function() { openEditor(-1); });
+    root.querySelector('[data-action="cancel"]').addEventListener('click', closeEditor);
+    root.querySelector('[data-action="save"]').addEventListener('click', saveEditor);
+    networkInput.addEventListener('change', function() { updateTypeFields(bandInput.value); });
+    lockTypeInput.addEventListener('change', function() { updateTypeFields(bandInput.value); });
+})();
+</script>
+
+<%+cbi/valuefooter%>

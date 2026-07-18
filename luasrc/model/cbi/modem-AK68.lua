@@ -242,141 +242,27 @@ function ipv6btn.write(self, section)
 end
 
 ------------
-smode = section:taboption("advanced", ListValue, "smode", translate("网络制式"))
-smode.default = "0"
-smode:value("0", translate("自动"))
-smode:value("1", translate("4G网络"))
-smode:value("2", translate("5G网络"))
+local lock_schedule_enable = section:taboption("advanced", Flag, "lock_schedule_enable",
+    translate("启用分时锁网"),
+    translate("所有网络制式与锁网设置统一在分时规则中配置；00:00 到 00:00 表示全天锁网。未命中规则或关闭此功能时使用自动网络，相邻时间段会直接切换。"))
+lock_schedule_enable.default = "0"
+lock_schedule_enable.rmempty = false
+log_flag(lock_schedule_enable, "分时锁网")
 
-local function validate_schedule_time(self, value)
-    local hour, minute = value:match("^(%d%d):(%d%d)$")
-    if not hour or tonumber(hour) > 23 or tonumber(minute) > 59 then
-        return nil, translate("请输入 HH:MM 格式的有效时间，例如 23:00")
+local lock_schedule_rules = section:taboption("advanced", Value, "lock_schedule_rules", translate("分时锁网规则"))
+lock_schedule_rules.template = "zmode-AK68/lock-schedule-AK68"
+lock_schedule_rules.rmempty = true
+lock_schedule_rules:depends("lock_schedule_enable", "1")
+lock_schedule_rules.validate = function(self, value)
+    value = value or ""
+    local util = require "luci.util"
+    local result = luci.sys.exec("/usr/bin/modem-auto-schedule-AK68.sh --validate " .. util.shellquote(value) .. " 2>&1") or ""
+    result = result:gsub("^%s+", ""):gsub("%s+$", "")
+    if result == "OK" then
+        return value
     end
-    return value
+    return nil, result ~= "" and result or translate("分时锁网规则校验失败")
 end
-
-local auto_schedule_enable = section:taboption("advanced", Flag, "auto_schedule_enable",
-    translate("定时恢复自动网络"),
-    translate("在指定时间段内临时使用自动网络制式，并解除频段、频点和小区锁定；时间段结束后恢复保存的网络与锁定设置。支持跨午夜。"))
-auto_schedule_enable.default = "0"
-auto_schedule_enable.rmempty = false
-log_flag(auto_schedule_enable, "定时恢复自动网络")
-
-local auto_schedule_start = section:taboption("advanced", Value, "auto_schedule_start", translate("自动模式开始时间"))
-auto_schedule_start.default = "02:00"
-auto_schedule_start.placeholder = "02:00"
-auto_schedule_start:depends("auto_schedule_enable", "1")
-auto_schedule_start.validate = validate_schedule_time
-
-local auto_schedule_end = section:taboption("advanced", Value, "auto_schedule_end", translate("自动模式结束时间"))
-auto_schedule_end.default = "06:00"
-auto_schedule_end.placeholder = "06:00"
-auto_schedule_end:depends("auto_schedule_enable", "1")
-auto_schedule_end.validate = validate_schedule_time
-
-nrmode = section:taboption("advanced", ListValue, "nrmode", translate("5G模式"))
-nrmode:value("0", translate("SA/NSA双模"))
-nrmode:value("1", translate("SA模式"))
-nrmode:value("2", translate("NSA模式"))
-nrmode:depends("smode","2")
-bandlist_lte = section:taboption("advanced", ListValue, "bandlist_lte", translate("LTE频段"))
-bandlist_lte.default = "0"
-bandlist_lte:value("0", translate("自动"))
-bandlist_lte:value("1", translate("BAND 1"))
-bandlist_lte:value("3", translate("BAND 3"))
-bandlist_lte:value("5", translate("BAND 5"))
-bandlist_lte:value("8", translate("BAND 8"))
-bandlist_lte:value("34", translate("BAND 34"))
-bandlist_lte:value("38", translate("BAND 38"))
-bandlist_lte:value("39", translate("BAND 39"))
-bandlist_lte:value("40", translate("BAND 40"))
-bandlist_lte:value("41", translate("BAND 41"))
-bandlist_lte:depends("smode","1")
-bandlist_sa = section:taboption("advanced", ListValue, "bandlist_sa", translate("5G-SA频段"))
-bandlist_sa.default = "0"
-bandlist_sa:value("0", translate("自动"))
-bandlist_sa:value("1", translate("BAND 1"))
-bandlist_sa:value("3", translate("BAND 3"))
-bandlist_sa:value("8", translate("BAND 8"))
-bandlist_sa:value("28", translate("BAND 28"))
-bandlist_sa:value("41", translate("BAND 41"))
-bandlist_sa:value("78", translate("BAND 78"))
-bandlist_sa:value("79", translate("BAND 79"))
-bandlist_sa:depends("nrmode","1")
-bandlist_nsa = section:taboption("advanced", ListValue, "bandlist_nsa", translate("5G-NSA频段"))
-bandlist_nsa.default = "0"
-bandlist_nsa:value("0", translate("自动"))
-bandlist_nsa:value("41", translate("BAND 41"))
-bandlist_nsa:value("78", translate("BAND 78"))
-bandlist_nsa:depends("nrmode","2")
-earfcn = section:taboption("advanced", Value, "earfcn", translate("频点EARFCN"))
-earfcn:depends("bandlist_lte","1")
-earfcn:depends("bandlist_lte","3")
-earfcn:depends("bandlist_lte","5")
-earfcn:depends("bandlist_lte","8")
-earfcn:depends("bandlist_lte","34")
-earfcn:depends("bandlist_lte","38")
-earfcn:depends("bandlist_lte","39")
-earfcn:depends("bandlist_lte","40")
-earfcn:depends("bandlist_lte","41")
-earfcn:depends("bandlist_sa","1")
-earfcn:depends("bandlist_sa","3")
-earfcn:depends("bandlist_sa","8")
-earfcn:depends("bandlist_sa","28")
-earfcn:depends("bandlist_sa","41")
-earfcn:depends("bandlist_sa","78")
-earfcn:depends("bandlist_sa","79")
-earfcn:depends("bandlist_nsa","41")
-earfcn:depends("bandlist_nsa","78")
-earfcn.rmempty = true
-cellid = section:taboption("advanced", Value, "cellid", translate("小区PCI"))
-cellid:depends("bandlist_lte","1")
-cellid:depends("bandlist_lte","3")
-cellid:depends("bandlist_lte","5")
-cellid:depends("bandlist_lte","8")
-cellid:depends("bandlist_lte","34")
-cellid:depends("bandlist_lte","38")
-cellid:depends("bandlist_lte","39")
-cellid:depends("bandlist_lte","40")
-cellid:depends("bandlist_lte","41")
-cellid:depends("bandlist_sa","1")
-cellid:depends("bandlist_sa","3")
-cellid:depends("bandlist_sa","8")
-cellid:depends("bandlist_sa","28")
-cellid:depends("bandlist_sa","41")
-cellid:depends("bandlist_sa","78")
-cellid:depends("bandlist_sa","79")
-cellid:depends("bandlist_nsa","41")
-cellid:depends("bandlist_nsa","78")
-cellid:depends("bandlist_sa","1")
-cellid:depends("bandlist_nsa","41")
-cellid.rmempty = true
-freqlock = section:taboption("advanced", Flag, "freqlock", translate("频点/小区锁定开关"),"设置后需要勾选开关才可以锁小区基站")
-freqlock:depends("bandlist_lte","1")
-freqlock:depends("bandlist_lte","3")
-freqlock:depends("bandlist_lte","5")
-freqlock:depends("bandlist_lte","8")
-freqlock:depends("bandlist_lte","34")
-freqlock:depends("bandlist_lte","38")
-freqlock:depends("bandlist_lte","39")
-freqlock:depends("bandlist_lte","40")
-freqlock:depends("bandlist_lte","41")
-
-freqlock:depends("bandlist_sa","1")
-freqlock:depends("bandlist_sa","3")
-freqlock:depends("bandlist_sa","5")
-freqlock:depends("bandlist_sa","8")
-freqlock:depends("bandlist_sa","28")
-freqlock:depends("bandlist_sa","41")
-freqlock:depends("bandlist_sa","78")
-freqlock:depends("bandlist_sa","79")
-
-freqlock:depends("bandlist_nsa","41")
-freqlock:depends("bandlist_nsa","78")
-freqlock:depends("bandlist_nsa","79")
-freqlock.rmempty = true
-log_flag(freqlock, "频点/小区锁定")
 
 dataroaming = section:taboption("advanced", Flag, "datarroaming", translate("国际漫游"),"适用于行动网路漫游的数据体验，可能会产生高昂的费用。")
 dataroaming.rmempty = true

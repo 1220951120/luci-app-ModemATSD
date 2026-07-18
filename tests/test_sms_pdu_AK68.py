@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest import mock
 
 
 SCRIPT = Path(__file__).parents[1] / "root/usr/bin/sms_pdu_AK68.py"
@@ -79,6 +80,17 @@ class SmsPduTests(unittest.TestCase):
         self.assertEqual(message["content"], "".join(parts))
         self.assertNotIn("Reference number", message["content"])
         self.assertNotIn("SMS segment", message["content"])
+
+    @mock.patch.object(SMS.subprocess, "run")
+    def test_modem_query_requires_terminal_ok(self, run):
+        run.return_value = mock.Mock(returncode=0, stdout="AT+CMGL=4\r\nERROR\r\n")
+        with self.assertRaisesRegex(RuntimeError, "未返回 OK"):
+            SMS.query_modem("all")
+
+    @mock.patch.object(SMS.subprocess, "run")
+    def test_modem_query_accepts_terminal_ok(self, run):
+        run.return_value = mock.Mock(returncode=0, stdout="AT+CMGL=4\r\nOK\r\n")
+        self.assertEqual(SMS.query_modem("all"), "AT+CMGL=4\r\nOK\r\n")
 
 
 if __name__ == "__main__":
