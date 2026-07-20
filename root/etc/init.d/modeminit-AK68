@@ -1,4 +1,6 @@
 #!/bin/sh /etc/rc.common
+
+. "${IPKG_INSTROOT:-}/usr/bin/modem-led-control-AK68.sh"
 START=98
 
 restart(){                                                                                                       
@@ -17,19 +19,19 @@ modem_init_AK68(){
   python3 /usr/bin/smstrun-AK68.py &
   if [ -f /usr/bin/ledflagc.conf ]; then
       echo "0" > /tmp/ledflag.conf
-      echo 0 > /sys/class/leds/hc:blue:cmode4/brightness
-      echo 0 > /sys/class/leds/hc:blue:cmode5/brightness
-      echo 0 > /sys/class/leds/hc:blue:wifi/brightness
-      echo 0 > /sys/class/leds/hc:blue:status/brightness
-      echo 0 > /sys/class/leds/hc:blue:sig1/brightness
-      echo 0 > /sys/class/leds/hc:blue:sig2/brightness
-      echo 0 > /sys/class/leds/hc:blue:sig3/brightness
-      echo 0 > /sys/class/leds/hc:blue:int/brightness
+      modem_led_set 0 cmode4
+      modem_led_set 0 cmode5
+      modem_led_set 0 wifi
+      modem_led_set 0 status
+      modem_led_set 0 sig1
+      modem_led_set 0 sig2
+      modem_led_set 0 sig3
+      modem_led_set 0 int
   else
-      echo 1 > /sys/class/leds/hc:blue:wifi/brightness
+      modem_led_set 1 wifi
   fi
   /usr/bin/BLUE4WAN-AK68.sh
-  echo 1 > /sys/class/leds/hc:blue:wifi/brightness
+  modem_led_set 1 wifi
   if [ ! -e /usr/share/modem/rm520n.sh ]; then
     echo 1 >/sys/class/gpio/cpe-pwr/value
   fi

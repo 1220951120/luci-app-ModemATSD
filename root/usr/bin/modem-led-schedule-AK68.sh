@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. "${IPKG_INSTROOT:-}/usr/bin/modem-led-control-AK68.sh"
+
 STATE=/tmp/modem-led-schedule-AK68.state
 ENABLE_STATE=/tmp/modem-led-schedule-AK68.enabled
 TAG=ModemATSD
@@ -9,11 +11,7 @@ log_message() {
 }
 
 set_leds() {
-    value="$1"
-    for led in cmode4 cmode5 wifi status sig1 sig2 sig3 int; do
-        file="/sys/class/leds/hc:blue:$led/brightness"
-        [ -w "$file" ] && echo "$value" > "$file"
-    done
+    modem_led_set "$1" cmode4 cmode5 wifi status sig1 sig2 sig3 int
 }
 
 lights_off() {
@@ -24,10 +22,7 @@ lights_off() {
 
 lights_auto() {
     rm -f /tmp/ledflag.conf /usr/bin/ledflagc.conf
-    for led in wifi status; do
-        file="/sys/class/leds/hc:blue:$led/brightness"
-        [ -w "$file" ] && echo 1 > "$file"
-    done
+    modem_led_set 1 wifi status
 }
 
 time_to_minutes() {

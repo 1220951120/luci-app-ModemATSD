@@ -1,4 +1,6 @@
 #!/bin/sh
+
+. "${IPKG_INSTROOT:-}/usr/bin/modem-led-control-AK68.sh"
 # 检查是否已经有锁文件存在
 lock_file="/var/run/devck_status-AK68.lock"
 exec 200>$lock_file
@@ -41,8 +43,8 @@ do
                 fi
             else
                 echo "AK68套件断开或未接入！" > /tmp/modconf-AK68.conf
-                echo 0 > /sys/class/leds/hc:blue:cmode5/brightness
-                echo 0 > /sys/class/leds/hc:blue:cmode4/brightness
+                modem_led_set 0 cmode5
+                modem_led_set 0 cmode4
                 sleep 1
                 continue
             fi
@@ -77,8 +79,8 @@ do
             fi
     else
         echo "AK68套件断开或未接入！" > /tmp/modconf-AK68.conf
-        echo 0 > /sys/class/leds/hc:blue:cmode5/brightness
-        echo 0 > /sys/class/leds/hc:blue:cmode4/brightness
+        modem_led_set 0 cmode5
+        modem_led_set 0 cmode4
         sleep 1
         continue
     fi
