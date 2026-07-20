@@ -72,6 +72,14 @@ class SmsForwardStateTests(unittest.TestCase):
         self.assertTrue(SMS_FORWARD.check_lock(lock_path))
         self.assertEqual(lock_path.read_text(encoding="ascii"), str(os.getpid()))
 
+    def test_health_file_contains_no_sms_content(self):
+        health_path = Path(self.directory.name) / "forward-health.json"
+        SMS_FORWARD.save_forward_health(True, storage_used=3, scanned=True, path=health_path)
+        health = health_path.read_text(encoding="utf-8")
+        self.assertIn('"storage_used":3', health)
+        self.assertNotIn("短信正文", health)
+        self.assertEqual(os.stat(health_path).st_mode & 0o777, 0o600)
+
 
 if __name__ == "__main__":
     unittest.main()

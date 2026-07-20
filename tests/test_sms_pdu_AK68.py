@@ -92,6 +92,56 @@ class SmsPduTests(unittest.TestCase):
         run.return_value = mock.Mock(returncode=0, stdout="AT+CMGL=4\r\nOK\r\n")
         self.assertEqual(SMS.query_modem("all"), "AT+CMGL=4\r\nOK\r\n")
 
+    @mock.patch.object(SMS.subprocess, "run")
+    def test_sms_configuration_restores_volatile_modem_settings(self, run):
+        run.return_value = mock.Mock(returncode=0, stdout="OK\r\n")
+        SMS.ensure_sms_configuration(force=True)
+
+        commands = [call.args[0][-1] for call in run.call_args_list]
+        self.assertEqual(
+            commands,
+            [
+                "AT+CMGF=0",
+                'AT+CPMS="SM","SM","SM"',
+                "AT+CNMI=2,1,0,2,0",
+            ],
+        )
+
+    @mock.patch.object(SMS, "ensure_sms_configuration")
+    @mock.patch.object(SMS.subprocess, "run")
+    def test_storage_usage_is_read_from_cpms(self, run, _ensure):
+        run.return_value = mock.Mock(
+            returncode=0,
+            stdout='AT+CPMS?\r\n+CPMS: "SM",5,50,"SM",5,50,"SM",5,50\r\nOK\r\n',
+        )
+        self.assertEqual(SMS.read_storage_usage(), (5, 50))
+
+    @mock.patch.object(SMS, "ensure_sms_configuration")
+    @mock.patch.object(SMS.subprocess, "run")
+    def test_index_scan_recovers_messages_when_cmgl_is_empty(self, run, _ensure):
+        first = make_ucs2_deliver_pdu("10086", "第一条测试短信")
+        second = make_ucs2_deliver_pdu("10010", "第二条测试短信")
+        run.side_effect = [
+            mock.Mock(returncode=0, stdout=f"AT+CMGR=0\r\n+CMGR: 1,,0\r\n{first}\r\nOK\r\n"),
+            mock.Mock(returncode=0, stdout="AT+CMGR=1\r\n+CMS ERROR: 321\r\n"),
+            mock.Mock(returncode=0, stdout=f"AT+CMGR=2\r\n+CMGR: 0,,0\r\n{second}\r\nOK\r\n"),
+        ]
+
+        messages, errors = SMS.read_messages_by_index("all", (2, 5))
+
+        self.assertEqual(errors, [])
+        self.assertEqual([message["indexes"] for message in messages], [[0], [2]])
+        self.assertEqual([message["content"] for message in messages], ["第一条测试短信", "第二条测试短信"])
+
+    @mock.patch.object(SMS, "read_messages_by_index")
+    @mock.patch.object(SMS, "read_storage_usage", return_value=(1, 50))
+    @mock.patch.object(SMS, "query_modem", return_value="AT+CMGL=4\r\nOK\r\n")
+    @mock.patch.object(SMS, "ensure_sms_configuration")
+    def test_empty_cmgl_uses_index_scan(self, _ensure, _query, _usage, indexed):
+        indexed.return_value = ([{"indexes": [7]}], [])
+        self.assertEqual(SMS.read_messages("all"), ([{"indexes": [7]}], []))
+        indexed.assert_called_once_with("all", (1, 50))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -329,6 +329,7 @@ local SMS_SENT_HISTORY = "/tmp/modem-sms-sent-AK68.jsonl"
 local SMS_FORWARD_TOKEN = "/usr/bin/smstrun-AK68.conf"
 local SMS_FORWARD_TITLE = "/usr/bin/smstrun-title-AK68.conf"
 local SMS_FORWARD_SERVICE = "/etc/init.d/modem-sms-forward-AK68"
+local SMS_FORWARD_HEALTH = "/tmp/modem-sms-forward-AK68.health"
 
 local function trim(value)
     return (value or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -449,12 +450,20 @@ function action_smscs()
     end
 
     if operation == "forward_status" then
+        local jsonc = require "luci.jsonc"
         local token = trim(fs.readfile(SMS_FORWARD_TOKEN) or "")
         local title = trim(fs.readfile(SMS_FORWARD_TITLE) or "")
+        local running = sms_forwarder_running()
+        local health = jsonc.parse(fs.readfile(SMS_FORWARD_HEALTH) or "")
+        local health_age = health and tonumber(health.timestamp) and (os.time() - tonumber(health.timestamp)) or nil
+        local healthy = running and health and health.ok == true and health_age and health_age >= -10 and health_age <= 120
         luci.http.write_json({
             success = true,
             enabled = token ~= "",
-            running = sms_forwarder_running(),
+            running = running,
+            healthy = healthy == true,
+            health_error = health and health.error or nil,
+            last_check = health and health.timestamp or nil,
             token_configured = token ~= "",
             title = title
         })

@@ -6,6 +6,7 @@ USE_PROCD=1
 
 TOKEN_FILE="/usr/bin/smstrun-AK68.conf"
 LOCK_FILE="/tmp/smstrun-AK68.lock"
+HEALTH_FILE="/tmp/modem-sms-forward-AK68.health"
 
 has_token() {
 	[ -f "$TOKEN_FILE" ] && grep -q '[^[:space:]]' "$TOKEN_FILE"
@@ -22,6 +23,7 @@ start_service() {
 
 	stop_legacy_forwarder
 	rm -f "$LOCK_FILE"
+	rm -f "$HEALTH_FILE"
 	procd_open_instance forwarder
 	procd_set_param command /usr/bin/python3 /usr/bin/smstrun-AK68.py
 	procd_set_param env PYTHONUNBUFFERED=1
@@ -37,6 +39,7 @@ stop_service() {
 
 service_stopped() {
 	rm -f "$LOCK_FILE"
+	rm -f "$HEALTH_FILE"
 }
 
 reload_service() {

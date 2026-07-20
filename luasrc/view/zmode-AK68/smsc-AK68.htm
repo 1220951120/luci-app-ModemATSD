@@ -284,10 +284,19 @@
             if (!data || !data.success) return;
             document.getElementById('sms-forward-title').value = data.title || '';
             document.getElementById('sms-forward-token').placeholder = data.token_configured ? '已配置，留空表示不修改' : '请输入 PushPlus Token';
-            var text = data.enabled ? (data.running ? '短信转发已开启并正在运行。' : '已配置 Token，但转发服务未运行。') : '短信转发未开启。';
+            var text;
+            if (!data.enabled) {
+                text = '短信转发未开启。';
+            } else if (!data.running) {
+                text = '已配置 Token，但转发服务未运行。';
+            } else if (!data.healthy) {
+                text = '转发进程正在运行，但短信读取链路异常' + (data.health_error ? '：' + data.health_error : '，正在等待模组就绪。');
+            } else {
+                text = '短信转发已开启，模组短信读取正常。';
+            }
             var node = document.getElementById('sms-forward-state');
             node.textContent = text;
-            node.style.color = data.enabled && data.running ? '#287928' : '#c9302c';
+            node.style.color = data.enabled && data.running && data.healthy ? '#287928' : '#c9302c';
         });
     }
 

@@ -22,6 +22,7 @@ class SmsForwardServiceTests(unittest.TestCase):
         self.assertIn("procd_set_param respawn", source)
         self.assertIn("PYTHONUNBUFFERED=1", source)
         self.assertIn("stop_legacy_forwarder", source)
+        self.assertIn('HEALTH_FILE="/tmp/modem-sms-forward-AK68.health"', source)
 
     def test_controller_uses_service_lifecycle_without_nohup(self):
         source = CONTROLLER.read_text(encoding="utf-8")

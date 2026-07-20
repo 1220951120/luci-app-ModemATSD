@@ -10,6 +10,8 @@ import sms_pdu_AK68
 FORWARD_STATE_PATH = "/etc/modem-sms-forward-AK68.state"
 FORWARD_STATE_VERSION = 1
 MAX_SAVED_FINGERPRINTS = 4096
+FORWARD_HEALTH_PATH = "/tmp/modem-sms-forward-AK68.health"
+FULL_SMS_SCAN_INTERVAL = 60
 
 
 def load_forward_state(path=FORWARD_STATE_PATH):
@@ -57,6 +59,29 @@ def save_forward_state(fingerprints, path=FORWARD_STATE_PATH):
         except FileNotFoundError:
             pass
         return False
+
+
+def save_forward_health(ok, storage_used=None, scanned=False, error=None, path=FORWARD_HEALTH_PATH):
+    temporary_path = f"{path}.tmp.{os.getpid()}"
+    data = {
+        "version": 1,
+        "timestamp": int(time.time()),
+        "ok": bool(ok),
+        "storage_used": storage_used,
+        "scanned": bool(scanned),
+        "error": str(error)[:500] if error else None,
+    }
+    try:
+        with open(temporary_path, "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=True, separators=(",", ":"))
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, path)
+    except OSError as health_error:
+        print(f"保存短信转发健康状态失败: {health_error}")
+        try:
+            os.remove(temporary_path)
+        except FileNotFoundError:
+            pass
 
 
 def remember_fingerprints(fingerprint_order, seen_fingerprints, fingerprints):
@@ -188,9 +213,24 @@ def forward():
         count = 0
         state_initialized, fingerprint_order = load_forward_state()
         seen_fingerprints = set(fingerprint_order)
+        last_storage_used = None
+        last_full_scan = 0.0
         while True:
             try:
-                messages, errors = sms_pdu_AK68.read_messages("all")
+                usage = sms_pdu_AK68.read_storage_usage()
+                now = time.monotonic()
+                scanned = (
+                    last_storage_used is None
+                    or usage[0] != last_storage_used
+                    or now - last_full_scan >= FULL_SMS_SCAN_INTERVAL
+                )
+                if scanned:
+                    messages, errors = sms_pdu_AK68.read_messages_by_index("all", usage)
+                    last_storage_used = usage[0]
+                    last_full_scan = now
+                else:
+                    messages, errors = [], []
+
                 for error in errors:
                     print(error)
 
@@ -208,10 +248,17 @@ def forward():
                         print(f"已建立短信转发基线，共记录 {len(fingerprint_order)} 个短信分段。")
                     else:
                         print("无法持久保存短信基线，本轮不会转发任何短信。")
+                    save_forward_health(
+                        not errors,
+                        storage_used=usage[0],
+                        scanned=scanned,
+                        error="；".join(errors) if errors else None,
+                    )
                     time.sleep(5)
                     continue
 
                 forwarded = False
+                retry_delivery = False
                 for sms in messages:
                     fingerprints = set(sms["fingerprints"])
                     if fingerprints.issubset(seen_fingerprints):
@@ -235,11 +282,26 @@ def forward():
                         count += 1
                         write_summary_to_file(count, message)
                         forwarded = True
+                    else:
+                        retry_delivery = True
 
-                if not forwarded:
+                if errors or retry_delivery:
+                    # Retry a failed decode or push on the next cycle even if
+                    # the number of occupied SMS slots did not change.
+                    last_storage_used = None
+
+                save_forward_health(
+                    not errors and not retry_delivery,
+                    storage_used=usage[0],
+                    scanned=scanned,
+                    error=("；".join(errors) if errors else "短信推送失败") if (errors or retry_delivery) else None,
+                )
+                if not forwarded and scanned:
                     print("未检测到新消息，继续检测...")
             except Exception as e:
                 print("发生未处理异常: ", str(e))
+                save_forward_health(False, error=e)
+                last_storage_used = None
             time.sleep(5)
     finally:
         remove_lock(lock_file)

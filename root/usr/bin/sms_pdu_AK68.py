@@ -7,6 +7,7 @@ import math
 import re
 import subprocess
 import sys
+import time
 
 
 GSM7_BASIC = (
@@ -29,7 +30,17 @@ GSM7_EXTENSION = {
 }
 
 CMGL_RE = re.compile(r"^\+CMGL:\s*(\d+)\s*,\s*([^,]+)")
+CMGR_RE = re.compile(r"^\+CMGR:\s*(.+)$")
+CPMS_RE = re.compile(r'^\+CPMS:\s*(?:"[^"]+"\s*,\s*)?(\d+)\s*,\s*(\d+)')
 HEX_RE = re.compile(r"^[0-9A-Fa-f]+$")
+TERMINAL_OK_RE = re.compile(r"(?:^|[\r\n])\s*OK\s*(?:[\r\n]|$)")
+TERMINAL_ERROR_RE = re.compile(
+    r"(?:^|[\r\n])\s*(?:ERROR|\+CMS ERROR:.*)\s*(?:[\r\n]|$)"
+)
+SMS_CONFIGURATION_INTERVAL = 30
+MAX_SMS_STORAGE_SLOTS = 1000
+
+_last_sms_configuration = 0.0
 
 
 def swap_bcd(byte):
@@ -299,8 +310,7 @@ def merge_messages(records):
     return messages
 
 
-def query_modem(status):
-    command = "AT+CMGL=0" if status == "unread" else "AT+CMGL=4"
+def run_modem_command(command, require_ok=True):
     process = subprocess.run(
         ["/usr/bin/atsd_tools_cli", "-i", "cpe", "-c", command],
         stdout=subprocess.PIPE,
@@ -310,16 +320,115 @@ def query_modem(status):
         check=False,
     )
     if process.returncode != 0:
-        raise RuntimeError(f"读取短信失败（退出码 {process.returncode}）")
-    if not re.search(r"(?:^|[\r\n])\s*OK\s*(?:[\r\n]|$)", process.stdout):
-        raise RuntimeError("读取短信失败（模组未返回 OK）")
+        raise RuntimeError(f"短信 AT 命令失败（{command}，退出码 {process.returncode}）")
+    if require_ok and not TERMINAL_OK_RE.search(process.stdout):
+        raise RuntimeError(f"短信 AT 命令失败（{command}，模组未返回 OK）")
     return process.stdout
 
 
-def read_messages(status="all", input_text=None):
-    output = input_text if input_text is not None else query_modem(status)
+def ensure_sms_configuration(force=False):
+    global _last_sms_configuration
+
+    now = time.monotonic()
+    if not force and now - _last_sms_configuration < SMS_CONFIGURATION_INTERVAL:
+        return
+
+    # MT5700 resets these volatile settings after a module/SIM restart.  Keep
+    # restoring them so a late modem initialization cannot silently disable
+    # SMS reception after the procd service has already started.
+    for command in (
+        "AT+CMGF=0",
+        'AT+CPMS="SM","SM","SM"',
+        "AT+CNMI=2,1,0,2,0",
+    ):
+        run_modem_command(command)
+    _last_sms_configuration = now
+
+
+def read_storage_usage():
+    ensure_sms_configuration()
+    output = run_modem_command("AT+CPMS?")
+    for line in output.replace("\r", "\n").split("\n"):
+        match = CPMS_RE.match(line.strip())
+        if match:
+            used, total = int(match.group(1)), int(match.group(2))
+            if total <= 0 or total > MAX_SMS_STORAGE_SLOTS or used < 0 or used > total:
+                break
+            return used, total
+    raise RuntimeError("读取短信存储容量失败（CPMS 返回格式无效）")
+
+
+def cmgr_to_cmgl(index, output):
+    lines = [line.strip() for line in output.replace("\r", "\n").split("\n")]
+    for position, line in enumerate(lines):
+        match = CMGR_RE.match(line)
+        if not match:
+            continue
+        payload_position = position + 1
+        while payload_position < len(lines) and not lines[payload_position]:
+            payload_position += 1
+        if payload_position >= len(lines) or not HEX_RE.fullmatch(lines[payload_position]):
+            raise RuntimeError(f"第 {index} 个短信槽位没有返回有效 PDU")
+        if len(lines[payload_position]) % 2:
+            raise RuntimeError(f"第 {index} 个短信槽位返回了奇数长度 PDU")
+        if not TERMINAL_OK_RE.search(output):
+            raise RuntimeError(f"第 {index} 个短信槽位读取未正常结束")
+        return f"+CMGL: {index},{match.group(1)}\r\n{lines[payload_position]}\r\n"
+    return None
+
+
+def query_message_slots(usage=None):
+    ensure_sms_configuration()
+    used, total = usage if usage is not None else read_storage_usage()
+    if used == 0:
+        return "OK\r\n"
+
+    records = []
+    for index in range(total):
+        output = run_modem_command(f"AT+CMGR={index}", require_ok=False)
+        record = cmgr_to_cmgl(index, output)
+        if record is not None:
+            records.append(record)
+            if len(records) >= used:
+                break
+        elif not TERMINAL_ERROR_RE.search(output):
+            raise RuntimeError(f"第 {index} 个短信槽位返回了无法识别的结果")
+
+    if len(records) != used:
+        raise RuntimeError(f"短信存储报告 {used} 条，实际只读取到 {len(records)} 条")
+    return "".join(records) + "OK\r\n"
+
+
+def query_modem(status):
+    command = "AT+CMGL=0" if status == "unread" else "AT+CMGL=4"
+    return run_modem_command(command)
+
+
+def parse_messages(output, status="all"):
     records, errors = parse_cmgl(output)
+    if status == "unread":
+        records = [record for record in records if record["status"] == 0]
     return merge_messages(records), errors
+
+
+def read_messages_by_index(status="all", usage=None):
+    return parse_messages(query_message_slots(usage), status)
+
+
+def read_messages(status="all", input_text=None):
+    if input_text is not None:
+        return parse_messages(input_text, status)
+
+    ensure_sms_configuration()
+    output = query_modem(status)
+    messages, errors = parse_messages(output, status)
+    if messages or errors:
+        return messages, errors
+
+    usage = read_storage_usage()
+    if usage[0] == 0:
+        return [], []
+    return read_messages_by_index(status, usage)
 
 
 def format_timestamp(timestamp):
