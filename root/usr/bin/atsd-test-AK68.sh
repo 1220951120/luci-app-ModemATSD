@@ -32,6 +32,11 @@ test_at '模组流量统计' 'AT^DSFLOWQRY' 'DSFLOWQRY:'
 
 pgrep -f '^/bin/sh /usr/bin/modem-traffic-AK68.sh run$' >/dev/null && pass '流量统计后台服务' || warn '流量统计后台服务未运行'
 pgrep -f '^/bin/sh /usr/bin/modem-led-schedule-AK68.sh run$' >/dev/null && pass 'LED 定时后台服务' || warn 'LED 定时后台服务未运行'
+if [ -s /usr/bin/smstrun-AK68.conf ]; then
+    /etc/init.d/modem-sms-forward-AK68 running >/dev/null 2>&1 && pass '短信转发后台服务' || warn '短信转发已配置但服务未运行'
+else
+    pass '短信转发未配置，不启动后台服务'
+fi
 [ -s /etc/config/modem-AK68 ] && pass 'ATSD UCI 配置' || fail 'ATSD UCI 配置不存在'
 [ -s /tmp/modem-traffic-AK68.state ] && pass '月度流量状态' || warn '月度流量状态尚未生成'
 

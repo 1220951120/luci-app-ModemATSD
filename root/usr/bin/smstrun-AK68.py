@@ -119,22 +119,61 @@ def write_summary_to_file(count, out):
     except Exception as e:
         print(f"写入文件失败: {e}")
 
-def check_lock(lock_file):
-    if os.path.exists(lock_file):
-        print("脚本已经在运行中。")
+def lock_owner_running(lock_file):
+    try:
+        with open(lock_file, "r", encoding="ascii") as file:
+            pid = int(file.read().strip())
+    except (FileNotFoundError, OSError, TypeError, ValueError):
         return False
-    else:
+
+    if pid <= 1:
+        return False
+    if pid == os.getpid():
+        return True
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as file:
+            arguments = file.read().split(b"\0")
+        return any(argument.endswith(b"/smstrun-AK68.py") for argument in arguments)
+    except OSError:
+        return True
+
+
+def check_lock(lock_file):
+    for _attempt in range(2):
         try:
-            with open(lock_file, 'w') as file:
+            descriptor = os.open(lock_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "w", encoding="ascii") as file:
                 file.write(str(os.getpid()))
             return True
-        except Exception as e:
-            print("无法创建锁文件: ", e)
+        except FileExistsError:
+            if lock_owner_running(lock_file):
+                print("脚本已经在运行中。")
+                return False
+            try:
+                os.remove(lock_file)
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                print("无法清理陈旧锁文件: ", error)
+                return False
+        except OSError as error:
+            print("无法创建锁文件: ", error)
             return False
+    return False
 
 def remove_lock(lock_file):
     try:
         os.remove(lock_file)
+    except FileNotFoundError:
+        pass
     except Exception as e:
         print("无法删除锁文件: ", e)
 

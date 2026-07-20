@@ -49,6 +49,7 @@ restore_backup() {
     uci commit modem-AK68 2>/dev/null || true
     /etc/init.d/modem-traffic-AK68 restart 2>/dev/null || true
     /etc/init.d/modem-led-schedule-AK68 restart 2>/dev/null || true
+    /etc/init.d/modem-sms-forward-AK68 restart 2>/dev/null || true
     /usr/bin/modem-apply-config-AK68.sh >/tmp/modem-apply-config-AK68.log 2>&1 &
 }
 

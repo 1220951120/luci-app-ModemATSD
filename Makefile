@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-ModemATSD
 PKG_VERSION:=2.9
-PKG_RELEASE:=23
+PKG_RELEASE:=25
 
 LUCI_TITLE:=LuCI for ModemATSD
 LUCI_DEPENDS:=@(aarch64) +luci-compat +python3 +python3-requests +bash +curl +flock

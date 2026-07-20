@@ -1,0 +1,4 @@
+#!/bin/sh
+
+[ ! -x /etc/init.d/modem-sms-forward-AK68 ] || /etc/init.d/modem-sms-forward-AK68 enable
+exit 0

@@ -302,7 +302,7 @@ function action_atsd_log()
     luci.http.prepare_content("application/json")
     local lines = tonumber(luci.http.formvalue("lines")) or 200
     if lines ~= 100 and lines ~= 200 and lines ~= 500 then lines = 200 end
-    local pattern = "atsd_tools|ModemATSD|MT5700_MODEM|RM520N_MODEM|modem-auto-schedule-AK68|modem-traffic-AK68|modem-led-schedule-AK68|modem-apply-config-AK68"
+    local pattern = "atsd_tools|ModemATSD|MT5700_MODEM|RM520N_MODEM|modem-auto-schedule-AK68|modem-traffic-AK68|modem-led-schedule-AK68|modem-sms-forward-AK68|smstrun-AK68|modem-apply-config-AK68"
     local system_log = luci.sys.exec("logread 2>/dev/null | grep -E " .. require("luci.util").shellquote(pattern) .. " | tail -n " .. lines) or ""
     local sections = {}
     local files = {
@@ -328,6 +328,7 @@ end
 local SMS_SENT_HISTORY = "/tmp/modem-sms-sent-AK68.jsonl"
 local SMS_FORWARD_TOKEN = "/usr/bin/smstrun-AK68.conf"
 local SMS_FORWARD_TITLE = "/usr/bin/smstrun-title-AK68.conf"
+local SMS_FORWARD_SERVICE = "/etc/init.d/modem-sms-forward-AK68"
 
 local function trim(value)
     return (value or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -359,19 +360,23 @@ local function append_sent_history(record)
     fs.chmod(SMS_SENT_HISTORY, "0600")
 end
 
+local function sms_forwarder_running()
+    return luci.sys.call(SMS_FORWARD_SERVICE .. " running >/dev/null 2>&1") == 0
+end
+
 local function stop_sms_forwarder()
-    local pids = luci.sys.exec("pgrep -f '^python3 /usr/bin/smstrun-AK68.py$'") or ""
-    for pid in pids:gmatch("%d+") do
-        luci.sys.call("kill " .. pid .. " >/dev/null 2>&1")
-    end
+    local stopped = luci.sys.call(SMS_FORWARD_SERVICE .. " stop >/dev/null 2>&1") == 0
     fs.remove("/tmp/smstrun-AK68.lock")
+    return stopped
 end
 
 local function start_sms_forwarder()
-    stop_sms_forwarder()
-    luci.sys.call("sleep 1")
     fs.remove("/tmp/smstrun-AK68.lock")
-    return luci.sys.call("nohup python3 /usr/bin/smstrun-AK68.py >/tmp/smstrun-AK68.log 2>&1 &") == 0
+    if luci.sys.call(SMS_FORWARD_SERVICE .. " restart >/dev/null 2>&1") ~= 0 then
+        return false
+    end
+    luci.sys.call("sleep 1")
+    return sms_forwarder_running()
 end
 
 local function sms_text_length(value)
@@ -446,11 +451,10 @@ function action_smscs()
     if operation == "forward_status" then
         local token = trim(fs.readfile(SMS_FORWARD_TOKEN) or "")
         local title = trim(fs.readfile(SMS_FORWARD_TITLE) or "")
-        local pids = luci.sys.exec("pgrep -f '^python3 /usr/bin/smstrun-AK68.py$'") or ""
         luci.http.write_json({
             success = true,
             enabled = token ~= "",
-            running = pids:match("%d+") ~= nil,
+            running = sms_forwarder_running(),
             token_configured = token ~= "",
             title = title
         })
@@ -568,9 +572,9 @@ function action_smscs()
     elseif operation == "forward_disable" then
         fs.writefile(SMS_FORWARD_TOKEN, "")
         fs.chmod(SMS_FORWARD_TOKEN, "0600")
-        stop_sms_forwarder()
+        local stopped = stop_sms_forwarder()
         modem_log("短信转发", "转发开关 -> 关闭")
-        luci.http.write_json({ success = true })
+        luci.http.write_json({ success = stopped, error = stopped and nil or "短信转发服务停止失败。" })
         return
     else
         luci.http.write_json({ success = false, error = "不支持的短信操作。" })

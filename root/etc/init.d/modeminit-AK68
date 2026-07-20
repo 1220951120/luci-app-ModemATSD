@@ -12,11 +12,6 @@ start(){
 }
 
 modem_init_AK68(){
-  echo "已尝试开启短信转发服务。"
-  sms_pids="$(pgrep -f '^python3 /usr/bin/smstrun-AK68.py$')"
-  [ -n "$sms_pids" ] && kill $sms_pids 2>/dev/null
-  rm -f /tmp/smstrun-AK68.lock
-  python3 /usr/bin/smstrun-AK68.py &
   if [ -f /usr/bin/ledflagc.conf ]; then
       echo "0" > /tmp/ledflag.conf
       modem_led_set 0 cmode4

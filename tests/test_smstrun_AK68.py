@@ -60,6 +60,18 @@ class SmsForwardStateTests(unittest.TestCase):
         self.assertFalse(initialized)
         self.assertEqual(fingerprints, [])
 
+    def test_process_lock_rejects_a_live_owner(self):
+        lock_path = Path(self.directory.name) / "forward.lock"
+        self.assertTrue(SMS_FORWARD.check_lock(lock_path))
+        self.assertFalse(SMS_FORWARD.check_lock(lock_path))
+        self.assertEqual(os.stat(lock_path).st_mode & 0o777, 0o600)
+
+    def test_process_lock_replaces_a_stale_pid(self):
+        lock_path = Path(self.directory.name) / "forward.lock"
+        lock_path.write_text("999999999", encoding="ascii")
+        self.assertTrue(SMS_FORWARD.check_lock(lock_path))
+        self.assertEqual(lock_path.read_text(encoding="ascii"), str(os.getpid()))
+
 
 if __name__ == "__main__":
     unittest.main()
