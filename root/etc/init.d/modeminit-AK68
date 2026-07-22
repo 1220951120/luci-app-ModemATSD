@@ -27,7 +27,10 @@ modem_init_AK68(){
   fi
   /usr/bin/BLUE4WAN-AK68.sh
   modem_led_set 1 wifi
-  if [ ! -e /usr/share/modem/rm520n.sh ]; then
+  # NB68 uses cpe-pwr for the external AK68/BLUE4 PoE supply.  On boards with
+  # ModemNU313 installed, the same exported GPIO belongs to the onboard modem,
+  # so leave its power state under nu313ctl control.
+  if [ ! -e /usr/share/modem/rm520n.sh ] && [ ! -e /usr/bin/nu313ctl ]; then
     echo 1 >/sys/class/gpio/cpe-pwr/value
   fi
   echo "AK68模块正在获取信息...请等待几分钟后刷新页面。" > /tmp/cpe_cell-AK68.file
