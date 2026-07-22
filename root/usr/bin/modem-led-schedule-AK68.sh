@@ -4,6 +4,7 @@
 
 STATE=/tmp/modem-led-schedule-AK68.state
 ENABLE_STATE=/tmp/modem-led-schedule-AK68.enabled
+OWNER_STATE=/tmp/modem-led-owner-AK68.state
 TAG=ModemATSD
 
 log_message() {
@@ -23,6 +24,41 @@ lights_off() {
 lights_auto() {
     rm -f /tmp/ledflag.conf /usr/bin/ledflagc.conf
     modem_led_set 1 wifi status
+}
+
+require_led_control() {
+    if ! modem_led_has_control; then
+        echo "当前 LED 控制权在 NU313，ATSD 未执行灯光操作。" >&2
+        return 1
+    fi
+}
+
+manual_action() {
+    action="$1"
+    require_led_control || return 1
+    case "$action" in
+        temporary-off)
+            set_leds 0
+            echo 0 > /tmp/ledflag.conf
+            log_message "临时关闭所有灯光"
+            ;;
+        temporary-on)
+            set_leds 1
+            echo 1 > /tmp/ledflag.conf
+            log_message "临时开启所有灯光"
+            ;;
+        auto)
+            lights_auto
+            rm -f "$STATE"
+            check_schedule
+            log_message "恢复自动灯光控制"
+            ;;
+        permanent-off)
+            lights_off
+            log_message "永久关闭所有灯光"
+            ;;
+        *) return 2 ;;
+    esac
 }
 
 time_to_minutes() {
@@ -47,6 +83,21 @@ check_schedule() {
     on_time="$(uci -q get modem-AK68.@ndis[0].led_schedule_on)"
     previous_enabled="$(cat "$ENABLE_STATE" 2>/dev/null)"
     last="$(cat "$STATE" 2>/dev/null)"
+    previous_owner="$(cat "$OWNER_STATE" 2>/dev/null)"
+    owner_changed=0
+
+    if ! modem_led_has_control; then
+        if [ "$previous_owner" != nu313 ]; then
+            log_message "LED 控制权已切换到 NU313，ATSD 灯光任务进入待命"
+        fi
+        echo nu313 > "$OWNER_STATE"
+        return 0
+    fi
+    if [ "$previous_owner" != atsd ]; then
+        log_message "LED 控制权已切换到 ATSD，重新应用 ATSD 灯光设置"
+        owner_changed=1
+    fi
+    echo atsd > "$OWNER_STATE"
 
     if [ "$enabled" != "1" ]; then
         if [ "$previous_enabled" != "0" ]; then
@@ -57,10 +108,25 @@ check_schedule() {
                 lights_auto
                 log_message "LED 定时控制停用，已恢复自动灯光控制"
                 ;;
+            *)
+                if [ "$owner_changed" = 1 ]; then
+                    if [ -f /usr/bin/ledflagc.conf ]; then
+                        set_leds 0
+                        echo 0 > /tmp/ledflag.conf
+                    else
+                        lights_auto
+                    fi
+                fi
+                ;;
         esac
         echo 0 > "$ENABLE_STATE"
         rm -f "$STATE"
         return 0
+    fi
+
+    if [ "$owner_changed" = 1 ]; then
+        last=''
+        rm -f "$STATE"
     fi
 
     off_time="${off_time:-23:00}"
@@ -106,7 +172,8 @@ check_schedule() {
 case "$1" in
     check) check_schedule;;
     run) while true; do check_schedule; sleep 20; done;;
-    off) lights_off; log_message "手动永久关闭所有灯光";;
-    on) lights_auto; log_message "手动恢复自动灯光控制";;
-    *) echo "Usage: $0 {run|check|off|on}" >&2; exit 1;;
+    temporary-off|temporary-on|auto|permanent-off) manual_action "$1";;
+    off) manual_action permanent-off;;
+    on) manual_action auto;;
+    *) echo "Usage: $0 {run|check|temporary-off|temporary-on|auto|permanent-off|off|on}" >&2; exit 1;;
 esac

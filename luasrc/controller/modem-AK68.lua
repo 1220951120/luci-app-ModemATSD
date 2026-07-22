@@ -26,8 +26,9 @@ function index()
 	entry({"admin", "modem-AK68", "nets"}, call("action_nets"), _("模组状态"), 97)
 	entry({"admin", "modem-AK68", "traffic"}, template("zmode-AK68/traffic-AK68"), _("流量统计"), 96)
 	entry({"admin", "modem-AK68", "modem"}, cbi(modem_cbi), _("模组设置"), 98) 
-	entry({"admin", "modem-AK68", "backup"}, call("action_atsd_backup"), _("备份与恢复"), 99)
-	entry({"admin", "modem-AK68", "debug"}, template("zmode-AK68/modem-debug-AK68"), _("模块调试"), 100)
+	entry({"admin", "modem-AK68", "led"}, cbi("modem-led-AK68"), _("LED灯光控制"), 99)
+	entry({"admin", "modem-AK68", "backup"}, call("action_atsd_backup"), _("备份与恢复"), 100)
+	entry({"admin", "modem-AK68", "debug"}, template("zmode-AK68/modem-debug-AK68"), _("模块调试"), 101)
 	entry({"admin", "modem-AK68", "run_selftest"}, call("action_run_selftest")).leaf = true
 	entry({"admin", "modem-AK68", "send_at"}, call("action_send_at")).leaf = true
 	entry({"admin", "modem-AK68", "atsd_log"}, call("action_atsd_log")).leaf = true
