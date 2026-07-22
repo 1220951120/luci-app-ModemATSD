@@ -2,22 +2,41 @@
 
 echo "uci settings"
 
+network_interface_exists() {
+	uci -q get "network.$1" >/dev/null 2>&1
+}
+
+disable_ipv6_on_v4_interface() {
+	local interface="$1"
+
+	network_interface_exists "$interface" || return 0
+	uci -q set "network.$interface.ipv6=0"
+	if uci -q get "dhcp.$interface" >/dev/null 2>&1; then
+		uci -q delete "dhcp.$interface.ra_flags"
+		uci -q add_list "dhcp.$interface.ra_flags=none"
+	fi
+}
+
+disable_ipv6_interface() {
+	local interface="$1"
+
+	network_interface_exists "$interface" || return 0
+	uci -q set "network.$interface.auto=0"
+}
+
+for interface in wan BLUE4WAN; do
+	disable_ipv6_on_v4_interface "$interface"
+done
+
+for interface in wan6 BLUE4WANV6; do
+	disable_ipv6_interface "$interface"
+done
+
 uci -q batch <<-EOF
 	del dhcp.lan.ra
 	del dhcp.lan.dhcpv6
 	del dhcp.lan.ra_flags
 	add_list dhcp.lan.ra_flags=none
-
-	set network.wan.ipv6='0'
-	del dhcp.wan.ra_flags
-	add_list dhcp.wan.ra_flags=none
-	
-	set network.BLUE4WAN.ipv6='0'
-	del dhcp.BLUE4WAN.ra_flags
-	add_list dhcp.BLUE4WAN.ra_flags=none
-
-	set network.wan6.auto=0
-	set network.BLUE4WANV6.auto=0
 
 	set dhcp.@dnsmasq[0].filter_aaaa='1'
 

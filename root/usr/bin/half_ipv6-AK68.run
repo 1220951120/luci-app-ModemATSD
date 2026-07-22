@@ -4,18 +4,37 @@ ipv6_dns_on() {
 	uci -q delete 'dhcp.@dnsmasq[0].filter_aaaa'
 }
 
+network_interface_exists() {
+	uci -q get "network.$1" >/dev/null 2>&1
+}
+
+enable_mwan3_ipv6() {
+	local interface
+
+	mwan3_ipv6_changed=0
+	for interface in wan6 BLUE4WANV6; do
+		[ "$(uci -q get "mwan3.$interface")" = "interface" ] || continue
+		[ "$(uci -q get "mwan3.$interface.enabled")" = "1" ] && continue
+		uci -q set "mwan3.$interface.enabled=1"
+		mwan3_ipv6_changed=1
+	done
+}
+
 ipv6_half_mode() {
+	local interface
+
+	for interface in wan BLUE4WAN; do
+		network_interface_exists "$interface" || continue
+		uci -q delete "network.$interface.ipv6"
+	done
+
+	for interface in wan6 BLUE4WANV6; do
+		network_interface_exists "$interface" || continue
+		uci -q delete "network.$interface.auto"
+		uci -q delete "dhcp.$interface"
+	done
+
 	uci -q batch <<-EOF >/dev/null
-		del network.wan.ipv6
-		del network.wan6.auto
-
-		del dhcp.wan6
-		
-		del network.BLUE4WAN.ipv6
-		del network.BLUE4WANV6.auto
-
-		del dhcp.BLUE4WANV6
-
 		set dhcp.lan.ra='relay'
 		del dhcp.lan.ra_slaac
 		del dhcp.lan.ra_flags
@@ -26,14 +45,17 @@ EOF
 }
 
 ipv6_half_mode
+enable_mwan3_ipv6
 
 uci -q batch <<-EOF >/dev/null
 	commit dhcp
 	commit network
 EOF
+[ "$mwan3_ipv6_changed" = 0 ] || uci -q commit mwan3
 
 /etc/init.d/odhcpd reload
 /etc/init.d/dnsmasq reload
 /etc/init.d/network reload
+[ "$mwan3_ipv6_changed" = 0 ] || /etc/init.d/mwan3 reload
 
 echo "Done"

@@ -1,0 +1,6 @@
+#!/bin/sh
+
+[ "$ACTION" = "ifupdate" ] || exit 0
+[ "$IFUPDATE_ADDRESSES" = "1" ] || exit 0
+
+/usr/bin/mwan3-ipv6-source-AK68.sh "$INTERFACE" "$DEVICE" >/dev/null 2>&1 &
