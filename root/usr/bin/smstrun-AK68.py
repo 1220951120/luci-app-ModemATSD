@@ -16,6 +16,9 @@ EMPTY_BASELINE_CONFIRMATIONS = 3
 FORWARD_HEALTH_PATH = "/tmp/modem-sms-forward-AK68.health"
 FULL_SMS_SCAN_INTERVAL = 60
 POLL_INTERVAL = 5
+FORWARD_MAX_MESSAGE_AGE = 24 * 60 * 60
+FORWARD_FUTURE_TOLERANCE = 5 * 60
+SMS_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 def normalize_fingerprints(values):
@@ -183,6 +186,21 @@ def baseline_confirmation(storage_used, errors, empty_confirmations):
         empty_confirmations,
         empty_confirmations >= EMPTY_BASELINE_CONFIRMATIONS,
     )
+
+
+def forwarding_timestamp_allowed(timestamp, now=None):
+    try:
+        message_time = datetime.strptime(timestamp or "", SMS_TIMESTAMP_FORMAT)
+    except (TypeError, ValueError):
+        return False, "短信时间缺失或格式无效"
+
+    current_time = now or datetime.now()
+    age_seconds = (current_time - message_time).total_seconds()
+    if age_seconds < -FORWARD_FUTURE_TOLERANCE:
+        return False, "短信时间明显晚于路由器当前时间"
+    if age_seconds > FORWARD_MAX_MESSAGE_AGE:
+        return False, "短信时间已超过 24 小时"
+    return True, None
 
 
 def read_token_from_config():
@@ -399,6 +417,23 @@ def forward():
                             "长短信尚未收全，等待剩余分段: "
                             f"{len(sms['indexes'])}/{sms['segment_count']}"
                         )
+                        continue
+
+                    timestamp_allowed, timestamp_error = forwarding_timestamp_allowed(
+                        sms.get("timestamp")
+                    )
+                    if not timestamp_allowed:
+                        print(f"跳过不符合 24 小时转发窗口的短信: {timestamp_error}。")
+                        remember_fingerprints(
+                            fingerprint_order,
+                            seen_fingerprints,
+                            sms["fingerprints"],
+                        )
+                        if not save_forward_state(
+                            active_storage_identity,
+                            fingerprint_order,
+                        ):
+                            print("无法保存已跳过短信的去重状态。")
                         continue
 
                     message = sms_pdu_AK68.format_message(sms)

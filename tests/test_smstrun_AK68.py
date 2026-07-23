@@ -1,4 +1,5 @@
 import importlib.util
+from datetime import datetime, timedelta
 import os
 from pathlib import Path
 import sys
@@ -124,6 +125,56 @@ class SmsForwardStateTests(unittest.TestCase):
         )
         self.assertFalse(initialized)
         self.assertEqual(fingerprints, [])
+
+    def test_forward_window_accepts_messages_up_to_24_hours_old(self):
+        now = datetime(2026, 7, 24, 12, 0, 0)
+        allowed, error = SMS_FORWARD.forwarding_timestamp_allowed(
+            (now - timedelta(hours=24)).strftime(SMS_FORWARD.SMS_TIMESTAMP_FORMAT),
+            now=now,
+        )
+        self.assertTrue(allowed)
+        self.assertIsNone(error)
+
+    def test_forward_window_rejects_messages_older_than_24_hours(self):
+        now = datetime(2026, 7, 24, 12, 0, 0)
+        allowed, error = SMS_FORWARD.forwarding_timestamp_allowed(
+            (now - timedelta(hours=24, seconds=1)).strftime(
+                SMS_FORWARD.SMS_TIMESTAMP_FORMAT
+            ),
+            now=now,
+        )
+        self.assertFalse(allowed)
+        self.assertIn("超过 24 小时", error)
+
+    def test_forward_window_rejects_missing_or_invalid_timestamp(self):
+        now = datetime(2026, 7, 24, 12, 0, 0)
+        for timestamp in ("", None, "not-a-time", "2026-02-30 12:00:00"):
+            with self.subTest(timestamp=timestamp):
+                allowed, error = SMS_FORWARD.forwarding_timestamp_allowed(
+                    timestamp, now=now
+                )
+                self.assertFalse(allowed)
+                self.assertIn("无效", error)
+
+    def test_forward_window_tolerates_only_small_future_clock_skew(self):
+        now = datetime(2026, 7, 24, 12, 0, 0)
+        within_tolerance = (now + timedelta(minutes=5)).strftime(
+            SMS_FORWARD.SMS_TIMESTAMP_FORMAT
+        )
+        outside_tolerance = (now + timedelta(minutes=5, seconds=1)).strftime(
+            SMS_FORWARD.SMS_TIMESTAMP_FORMAT
+        )
+
+        self.assertTrue(
+            SMS_FORWARD.forwarding_timestamp_allowed(
+                within_tolerance, now=now
+            )[0]
+        )
+        allowed, error = SMS_FORWARD.forwarding_timestamp_allowed(
+            outside_tolerance, now=now
+        )
+        self.assertFalse(allowed)
+        self.assertIn("晚于", error)
 
     def test_process_lock_rejects_a_live_owner(self):
         lock_path = Path(self.directory.name) / "forward.lock"
