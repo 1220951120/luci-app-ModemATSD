@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 import requests
 from datetime import datetime
@@ -8,41 +9,85 @@ import sms_pdu_AK68
 
 
 FORWARD_STATE_PATH = "/etc/modem-sms-forward-AK68.state"
-FORWARD_STATE_VERSION = 1
+FORWARD_STATE_VERSION = 2
 MAX_SAVED_FINGERPRINTS = 4096
+MAX_SAVED_STORAGE_PROFILES = 8
+EMPTY_BASELINE_CONFIRMATIONS = 3
 FORWARD_HEALTH_PATH = "/tmp/modem-sms-forward-AK68.health"
 FULL_SMS_SCAN_INTERVAL = 60
+POLL_INTERVAL = 5
 
 
-def load_forward_state(path=FORWARD_STATE_PATH):
+def normalize_fingerprints(values):
+    fingerprints = []
+    seen = set()
+    for value in values if isinstance(values, list) else []:
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+            continue
+        if value in seen:
+            continue
+        seen.add(value)
+        fingerprints.append(value)
+    return fingerprints[-MAX_SAVED_FINGERPRINTS:]
+
+
+def read_forward_state(path=FORWARD_STATE_PATH):
     try:
         with open(path, "r", encoding="utf-8") as file:
             data = json.load(file)
         if data.get("version") != FORWARD_STATE_VERSION:
             raise ValueError("状态版本不受支持")
 
-        fingerprints = []
-        seen = set()
-        for value in data.get("fingerprints", []):
-            if not isinstance(value, str) or len(value) != 64:
+        raw_storages = data.get("storages")
+        if not isinstance(raw_storages, dict):
+            raise ValueError("短信存储状态格式无效")
+
+        storages = {}
+        for storage_identity, profile in raw_storages.items():
+            if not isinstance(storage_identity, str) or not re.fullmatch(
+                r"[0-9a-f]{64}", storage_identity
+            ):
                 continue
-            if value in seen:
+            if not isinstance(profile, dict):
                 continue
-            seen.add(value)
-            fingerprints.append(value)
-        return True, fingerprints[-MAX_SAVED_FINGERPRINTS:]
+            storages[storage_identity] = {
+                "initialized": profile.get("initialized") is True,
+                "fingerprints": normalize_fingerprints(profile.get("fingerprints")),
+            }
+        return storages
     except FileNotFoundError:
-        return False, []
+        return {}
     except Exception as error:
         print(f"读取短信转发去重状态失败，将重新建立基线: {error}")
+        return {}
+
+
+def load_forward_state(storage_identity, path=FORWARD_STATE_PATH):
+    profile = read_forward_state(path).get(storage_identity)
+    if not profile:
         return False, []
+    return profile["initialized"], profile["fingerprints"]
 
 
-def save_forward_state(fingerprints, path=FORWARD_STATE_PATH):
+def save_forward_state(
+    storage_identity,
+    fingerprints,
+    initialized=True,
+    path=FORWARD_STATE_PATH,
+):
     temporary_path = f"{path}.tmp.{os.getpid()}"
+    storages = read_forward_state(path)
+    storages.pop(storage_identity, None)
+    storages[storage_identity] = {
+        "initialized": bool(initialized),
+        "fingerprints": normalize_fingerprints(list(fingerprints)),
+    }
+    while len(storages) > MAX_SAVED_STORAGE_PROFILES:
+        del storages[next(iter(storages))]
+
     data = {
         "version": FORWARD_STATE_VERSION,
-        "fingerprints": list(fingerprints)[-MAX_SAVED_FINGERPRINTS:],
+        "storages": storages,
     }
     try:
         with open(temporary_path, "w", encoding="utf-8") as file:
@@ -61,7 +106,14 @@ def save_forward_state(fingerprints, path=FORWARD_STATE_PATH):
         return False
 
 
-def save_forward_health(ok, storage_used=None, scanned=False, error=None, path=FORWARD_HEALTH_PATH):
+def save_forward_health(
+    ok,
+    storage_used=None,
+    scanned=False,
+    ready=True,
+    error=None,
+    path=FORWARD_HEALTH_PATH,
+):
     temporary_path = f"{path}.tmp.{os.getpid()}"
     data = {
         "version": 1,
@@ -69,6 +121,7 @@ def save_forward_health(ok, storage_used=None, scanned=False, error=None, path=F
         "ok": bool(ok),
         "storage_used": storage_used,
         "scanned": bool(scanned),
+        "ready": bool(ready),
         "error": str(error)[:500] if error else None,
     }
     try:
@@ -98,14 +151,38 @@ def remember_fingerprints(fingerprint_order, seen_fingerprints, fingerprints):
         seen_fingerprints.difference_update(expired)
 
 
-def establish_forward_baseline(messages, fingerprint_order, seen_fingerprints, path=FORWARD_STATE_PATH):
+def establish_forward_baseline(
+    storage_identity,
+    messages,
+    fingerprint_order,
+    seen_fingerprints,
+    initialized=True,
+    path=FORWARD_STATE_PATH,
+):
     for sms in messages:
         remember_fingerprints(
             fingerprint_order,
             seen_fingerprints,
             sms["fingerprints"],
         )
-    return save_forward_state(fingerprint_order, path)
+    return save_forward_state(
+        storage_identity,
+        fingerprint_order,
+        initialized=initialized,
+        path=path,
+    )
+
+
+def baseline_confirmation(storage_used, errors, empty_confirmations):
+    if errors:
+        return 0, False
+    if storage_used > 0:
+        return EMPTY_BASELINE_CONFIRMATIONS, True
+    empty_confirmations += 1
+    return (
+        empty_confirmations,
+        empty_confirmations >= EMPTY_BASELINE_CONFIRMATIONS,
+    )
 
 
 def read_token_from_config():
@@ -211,16 +288,35 @@ def forward():
         token = read_token_from_config()
         print("Enjoy! 已完成测试并开启转发功能，重启后完成开机自启。")
         count = 0
-        state_initialized, fingerprint_order = load_forward_state()
-        seen_fingerprints = set(fingerprint_order)
+        active_storage_identity = None
+        state_initialized = False
+        fingerprint_order = []
+        seen_fingerprints = set()
+        empty_baseline_confirmations = 0
         last_storage_used = None
         last_full_scan = 0.0
         while True:
             try:
+                storage_identity = sms_pdu_AK68.read_sms_storage_identity()
+                if storage_identity != active_storage_identity:
+                    active_storage_identity = storage_identity
+                    state_initialized, fingerprint_order = load_forward_state(
+                        active_storage_identity
+                    )
+                    seen_fingerprints = set(fingerprint_order)
+                    empty_baseline_confirmations = 0
+                    last_storage_used = None
+                    last_full_scan = 0.0
+                    if state_initialized:
+                        print("已切换到存在短信转发基线的 SIM 存储。")
+                    else:
+                        print("检测到新的 SIM 存储，将先建立历史短信基线。")
+
                 usage = sms_pdu_AK68.read_storage_usage()
                 now = time.monotonic()
                 scanned = (
-                    last_storage_used is None
+                    not state_initialized
+                    or last_storage_used is None
                     or usage[0] != last_storage_used
                     or now - last_full_scan >= FULL_SMS_SCAN_INTERVAL
                 )
@@ -231,30 +327,64 @@ def forward():
                 else:
                     messages, errors = [], []
 
+                if scanned:
+                    confirmed_identity = sms_pdu_AK68.read_sms_storage_identity()
+                    if confirmed_identity != active_storage_identity:
+                        print("扫描期间 SIM 存储发生切换，本轮结果已丢弃。")
+                        active_storage_identity = None
+                        last_storage_used = None
+                        save_forward_health(
+                            False,
+                            storage_used=usage[0],
+                            scanned=True,
+                            ready=False,
+                            error="扫描期间 SIM 存储发生切换，正在重新建立基线。",
+                        )
+                        time.sleep(POLL_INTERVAL)
+                        continue
+
                 for error in errors:
                     print(error)
 
-                # The first run only records what is already stored on the
-                # modem. This prevents package upgrades, service restarts, or
-                # a replaced/corrupt state file from forwarding the inbox as
-                # if every historical unread SMS had just arrived.
+                # A baseline belongs to one physical SIM identity. A newly
+                # selected SIM must never inherit another SIM's empty or stale
+                # baseline. Empty storage is confirmed repeatedly because the
+                # modem can temporarily report zero while reinitializing.
                 if not state_initialized:
+                    empty_baseline_confirmations, baseline_ready = baseline_confirmation(
+                        usage[0],
+                        errors,
+                        empty_baseline_confirmations,
+                    )
                     if establish_forward_baseline(
+                        active_storage_identity,
                         messages,
                         fingerprint_order,
                         seen_fingerprints,
+                        initialized=baseline_ready,
                     ):
-                        state_initialized = True
-                        print(f"已建立短信转发基线，共记录 {len(fingerprint_order)} 个短信分段。")
+                        state_initialized = baseline_ready
+                        if state_initialized:
+                            print(
+                                "已建立短信转发基线，共记录 "
+                                f"{len(fingerprint_order)} 个短信分段。"
+                            )
+                        else:
+                            print(
+                                "短信存储暂为空，正在确认基线 "
+                                f"({empty_baseline_confirmations}/"
+                                f"{EMPTY_BASELINE_CONFIRMATIONS})。"
+                            )
                     else:
                         print("无法持久保存短信基线，本轮不会转发任何短信。")
                     save_forward_health(
                         not errors,
                         storage_used=usage[0],
                         scanned=scanned,
+                        ready=state_initialized,
                         error="；".join(errors) if errors else None,
                     )
-                    time.sleep(5)
+                    time.sleep(POLL_INTERVAL)
                     continue
 
                 forwarded = False
@@ -278,7 +408,10 @@ def forward():
                             seen_fingerprints,
                             sms["fingerprints"],
                         )
-                        save_forward_state(fingerprint_order)
+                        save_forward_state(
+                            active_storage_identity,
+                            fingerprint_order,
+                        )
                         count += 1
                         write_summary_to_file(count, message)
                         forwarded = True
@@ -294,15 +427,20 @@ def forward():
                     not errors and not retry_delivery,
                     storage_used=usage[0],
                     scanned=scanned,
+                    ready=True,
                     error=("；".join(errors) if errors else "短信推送失败") if (errors or retry_delivery) else None,
                 )
                 if not forwarded and scanned:
                     print("未检测到新消息，继续检测...")
             except Exception as e:
                 print("发生未处理异常: ", str(e))
-                save_forward_health(False, error=e)
+                save_forward_health(
+                    False,
+                    ready=state_initialized,
+                    error=e,
+                )
                 last_storage_used = None
-            time.sleep(5)
+            time.sleep(POLL_INTERVAL)
     finally:
         remove_lock(lock_file)
 

@@ -412,17 +412,17 @@ end
 
 local function normalize_phone_number(value)
     local number = trim(value)
-    local explicit_international = number:sub(1, 1) == "+" or number:sub(1, 2) == "00"
     number = number:gsub("[%s%-%(%)]", "")
-    number = number:gsub("^%+", ""):gsub("^00", "")
-    if not number:match("^%d+$") or #number < 5 or #number > 20 then
+    if number:sub(1, 2) == "00" then
+        number = "+" .. number:sub(3)
+    end
+    local digits = number:gsub("^%+", "")
+    if not digits:match("^%d+$") or #digits < 5 or #digits > 20 then
         return nil, "请输入 5～20 位有效电话号码。"
     end
-    -- PDU 编码器使用国际号码类型（TON=91）。国内号码和 10010 等
-    -- 短服务号码必须补 86；显式使用 “+” 或 “00” 时按国际号码处理。
-    if not explicit_international and #number <= 11 and number:sub(1, 2) ~= "86" then
-        number = "86" .. number
-    end
+    -- Preserve national numbers exactly as entered. The PDU encoder uses
+    -- TP-TOA 0x81 for these numbers, including short service codes such as
+    -- 10010. Only an explicit '+' or '00' selects international TP-TOA 0x91.
     return number
 end
 
@@ -457,12 +457,14 @@ function action_smscs()
         local running = sms_forwarder_running()
         local health = jsonc.parse(fs.readfile(SMS_FORWARD_HEALTH) or "")
         local health_age = health and tonumber(health.timestamp) and (os.time() - tonumber(health.timestamp)) or nil
-        local healthy = running and health and health.ok == true and health_age and health_age >= -10 and health_age <= 120
+        local ready = health and health.ready ~= false
+        local healthy = running and health and health.ok == true and ready and health_age and health_age >= -10 and health_age <= 120
         luci.http.write_json({
             success = true,
             enabled = token ~= "",
             running = running,
             healthy = healthy == true,
+            initializing = running and health and health.ok == true and health.ready == false,
             health_error = health and health.error or nil,
             last_check = health and health.timestamp or nil,
             token_configured = token ~= "",

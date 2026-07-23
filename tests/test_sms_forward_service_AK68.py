@@ -31,6 +31,10 @@ class SmsForwardServiceTests(unittest.TestCase):
         self.assertIn('SMS_FORWARD_SERVICE .. " stop', source)
         self.assertIn('SMS_FORWARD_SERVICE .. " running', source)
         self.assertNotIn("nohup python3 /usr/bin/smstrun-AK68.py", source)
+        self.assertIn("health.ready ~= false", source)
+        self.assertIn("initializing =", source)
+        self.assertNotIn('"86" .. number', source)
+        self.assertIn('number = "+" .. number:sub(3)', source)
 
     def test_modem_init_does_not_start_a_second_forwarder(self):
         source = MODEM_INIT.read_text(encoding="utf-8")

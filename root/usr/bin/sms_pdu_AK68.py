@@ -42,6 +42,25 @@ MAX_SMS_STORAGE_SLOTS = 1000
 
 _last_sms_configuration = 0.0
 
+SMS_IDENTITY_QUERIES = (
+    (
+        "AT^ICCID?",
+        re.compile(r'^\s*\^ICCID:\s*"?([0-9Ff]{10,32})"?\s*$', re.MULTILINE),
+    ),
+    (
+        "AT+QCCID",
+        re.compile(r'^\s*\+QCCID:\s*"?([0-9]{10,32})"?\s*$', re.MULTILINE),
+    ),
+    (
+        "AT+ICCID",
+        re.compile(r'^\s*\+ICCID:\s*"?([0-9]{10,32})"?\s*$', re.MULTILINE),
+    ),
+    (
+        "AT+CIMI",
+        re.compile(r"^\s*([0-9]{10,20})\s*$", re.MULTILINE),
+    ),
+)
+
 
 def swap_bcd(byte):
     return (byte & 0x0F) * 10 + ((byte >> 4) & 0x0F)
@@ -343,6 +362,30 @@ def ensure_sms_configuration(force=False):
     ):
         run_modem_command(command)
     _last_sms_configuration = now
+
+
+def read_sms_storage_identity():
+    errors = []
+    for command, pattern in SMS_IDENTITY_QUERIES:
+        try:
+            output = run_modem_command(command)
+        except RuntimeError as error:
+            errors.append(str(error))
+            continue
+
+        match = pattern.search(output)
+        if not match:
+            errors.append(f"{command} 未返回可识别的 SIM 身份")
+            continue
+
+        # The MT5700M-CN manual specifies AT^ICCID? for the active SIM.
+        # Persist only a one-way identifier; never write ICCID/IMSI plaintext
+        # to forwarding state or logs.
+        identity = match.group(1).upper().rstrip("F")
+        return hashlib.sha256(f"sms-storage:{identity}".encode("ascii")).hexdigest()
+
+    detail = "；".join(errors[-2:]) if errors else "模组未返回 SIM 身份"
+    raise RuntimeError(f"无法确认当前短信存储身份（{detail}）")
 
 
 def read_storage_usage():

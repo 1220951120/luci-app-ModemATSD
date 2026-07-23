@@ -42,6 +42,29 @@ def cmgl_output(items):
 
 
 class SmsPduTests(unittest.TestCase):
+    @mock.patch.object(SMS, "run_modem_command")
+    def test_mt5700_storage_identity_uses_hashed_iccid(self, command):
+        iccid = "8986000000000000000F"
+        command.return_value = f"AT^ICCID?\r\n^ICCID: {iccid}\r\nOK\r\n"
+
+        identity = SMS.read_sms_storage_identity()
+
+        self.assertEqual(len(identity), 64)
+        self.assertNotIn(iccid, identity)
+        command.assert_called_once_with("AT^ICCID?")
+
+    @mock.patch.object(SMS, "run_modem_command")
+    def test_storage_identity_falls_back_to_imsi(self, command):
+        command.side_effect = [
+            RuntimeError("unsupported"),
+            RuntimeError("unsupported"),
+            RuntimeError("unsupported"),
+            "AT+CIMI\r\n460001234567890\r\nOK\r\n",
+        ]
+
+        self.assertEqual(len(SMS.read_sms_storage_identity()), 64)
+        self.assertEqual(command.call_args_list[-1].args[0], "AT+CIMI")
+
     def test_single_ucs2_message_and_scts(self):
         content = "测试验证码：123456，请勿泄露。"
         pdu = make_ucs2_deliver_pdu("10086", content)

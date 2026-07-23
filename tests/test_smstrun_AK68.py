@@ -17,12 +17,16 @@ class SmsForwardStateTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.state_path = Path(self.directory.name) / "forward-state.json"
+        self.storage_a = "a" * 64
+        self.storage_b = "b" * 64
 
     def tearDown(self):
         self.directory.cleanup()
 
     def test_missing_state_requires_a_baseline(self):
-        initialized, fingerprints = SMS_FORWARD.load_forward_state(self.state_path)
+        initialized, fingerprints = SMS_FORWARD.load_forward_state(
+            self.storage_a, self.state_path
+        )
         self.assertFalse(initialized)
         self.assertEqual(fingerprints, [])
 
@@ -33,10 +37,16 @@ class SmsForwardStateTests(unittest.TestCase):
         seen = set()
 
         saved = SMS_FORWARD.establish_forward_baseline(
-            messages, order, seen, self.state_path
+            self.storage_a,
+            messages,
+            order,
+            seen,
+            path=self.state_path,
         )
         self.assertTrue(saved)
-        initialized, reloaded = SMS_FORWARD.load_forward_state(self.state_path)
+        initialized, reloaded = SMS_FORWARD.load_forward_state(
+            self.storage_a, self.state_path
+        )
         self.assertTrue(initialized)
         self.assertEqual(reloaded, [fingerprint])
         self.assertEqual(os.stat(self.state_path).st_mode & 0o777, 0o600)
@@ -44,9 +54,15 @@ class SmsForwardStateTests(unittest.TestCase):
 
     def test_restart_recognizes_previously_seen_segments(self):
         fingerprints = ["1" * 64, "2" * 64]
-        self.assertTrue(SMS_FORWARD.save_forward_state(fingerprints, self.state_path))
+        self.assertTrue(
+            SMS_FORWARD.save_forward_state(
+                self.storage_a, fingerprints, path=self.state_path
+            )
+        )
 
-        initialized, order = SMS_FORWARD.load_forward_state(self.state_path)
+        initialized, order = SMS_FORWARD.load_forward_state(
+            self.storage_a, self.state_path
+        )
         self.assertTrue(initialized)
         seen = set(order)
         self.assertTrue(set(fingerprints).issubset(seen))
@@ -56,7 +72,56 @@ class SmsForwardStateTests(unittest.TestCase):
 
     def test_corrupt_state_fails_closed_to_a_new_baseline(self):
         self.state_path.write_text("not-json", encoding="utf-8")
-        initialized, fingerprints = SMS_FORWARD.load_forward_state(self.state_path)
+        initialized, fingerprints = SMS_FORWARD.load_forward_state(
+            self.storage_a, self.state_path
+        )
+        self.assertFalse(initialized)
+        self.assertEqual(fingerprints, [])
+
+    def test_sim_profiles_do_not_share_history(self):
+        old_external_sms = ["1" * 64, "2" * 64, "3" * 64]
+        self.assertTrue(
+            SMS_FORWARD.save_forward_state(
+                self.storage_a, [], path=self.state_path
+            )
+        )
+        self.assertTrue(
+            SMS_FORWARD.save_forward_state(
+                self.storage_b, old_external_sms, path=self.state_path
+            )
+        )
+
+        initialized_a, fingerprints_a = SMS_FORWARD.load_forward_state(
+            self.storage_a, self.state_path
+        )
+        initialized_b, fingerprints_b = SMS_FORWARD.load_forward_state(
+            self.storage_b, self.state_path
+        )
+
+        self.assertTrue(initialized_a)
+        self.assertEqual(fingerprints_a, [])
+        self.assertTrue(initialized_b)
+        self.assertEqual(fingerprints_b, old_external_sms)
+
+    def test_empty_baseline_requires_three_clean_confirmations(self):
+        confirmations = 0
+        ready_values = []
+        for _ in range(3):
+            confirmations, ready = SMS_FORWARD.baseline_confirmation(
+                0, [], confirmations
+            )
+            ready_values.append(ready)
+
+        self.assertEqual(ready_values, [False, False, True])
+
+    def test_v1_state_fails_closed_instead_of_crossing_sim_profiles(self):
+        self.state_path.write_text(
+            '{"version":1,"fingerprints":["' + "1" * 64 + '"]}',
+            encoding="utf-8",
+        )
+        initialized, fingerprints = SMS_FORWARD.load_forward_state(
+            self.storage_b, self.state_path
+        )
         self.assertFalse(initialized)
         self.assertEqual(fingerprints, [])
 
@@ -77,6 +142,7 @@ class SmsForwardStateTests(unittest.TestCase):
         SMS_FORWARD.save_forward_health(True, storage_used=3, scanned=True, path=health_path)
         health = health_path.read_text(encoding="utf-8")
         self.assertIn('"storage_used":3', health)
+        self.assertIn('"ready":true', health)
         self.assertNotIn("短信正文", health)
         self.assertEqual(os.stat(health_path).st_mode & 0o777, 0o600)
 

@@ -289,6 +289,8 @@
                 text = '短信转发未开启。';
             } else if (!data.running) {
                 text = '已配置 Token，但转发服务未运行。';
+            } else if (data.initializing) {
+                text = '正在建立当前 SIM 的历史短信基线，完成后只转发新短信。';
             } else if (!data.healthy) {
                 text = '转发进程正在运行，但短信读取链路异常' + (data.health_error ? '：' + data.health_error : '，正在等待模组就绪。');
             } else {

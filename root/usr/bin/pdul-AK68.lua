@@ -1,6 +1,13 @@
 function encodeToPDU(smsc, phoneNumber, message)
     local function TONGen(input, isPhonenum)
-        local TONBegin = "91"
+        local TONBegin = isPhonenum and "81" or "91"
+        if input:sub(1, 1) == "+" then
+            input = input:sub(2)
+            TONBegin = "91"
+        elseif input:sub(1, 2) == "00" then
+            input = input:sub(3)
+            TONBegin = "91"
+        end
         local orinInput = input
         if #input % 2 == 1 then
             input = input .. 'F'
@@ -137,4 +144,3 @@ local pdu = encodeToPDU(smsc, phoneNumber, message)
 for i, segment in ipairs(pdu) do
     print(segment)
 end
-
