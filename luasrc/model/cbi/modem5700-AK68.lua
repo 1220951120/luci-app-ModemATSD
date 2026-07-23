@@ -67,6 +67,24 @@ simsel:value("1", translate("内置SIM1"))
 --simsel:value("2", translate("内置SIM2"))
 simsel.rmempty = true
 
+function simsel.write(self, section_id, value)
+    if value ~= "0" and value ~= "1" then
+        self.map.message = translate("SIM 卡槽参数无效。")
+        return
+    end
+
+    local util = require "luci.util"
+    local result = luci.sys.exec("/usr/bin/modem-sim-switch-AK68.sh " .. util.shellquote(value) .. " 2>&1") or ""
+    result = result:gsub("^%s+", ""):gsub("%s+$", "")
+    if result == "OK" then
+        self.map:set(section_id, self.option, value)
+        modem_log("SIM切换", value == "1" and "已应用内置SIM1" or "已应用外置SIM卡")
+    else
+        self.map.message = translate("SIM 卡切换失败：") .. (result ~= "" and result or translate("模组未返回结果。"))
+        modem_log("SIM切换", "网页应用失败：" .. (result ~= "" and result or "无返回"))
+    end
+end
+
 ------------
 pincode = section:taboption("general", Value, "pincode", translate("PIN-密码"))
 pincode.default=""
@@ -413,20 +431,11 @@ function takeof_btn.write()
     return nil
 end
 ------------
-local apply = luci.http.formvalue("cbi.apply")
-local sys = require "luci.sys"
-local file = io.open("/tmp/modconf-AK68.conf", "r")
-if apply then
-    --function m.on_commit(map)
-    --end
-    if file then
-        local content = file:read("*all")
-        file:close()
-        if content and string.find(content, "RM520") then
-            --io.popen("/usr/share/modem-AK68/rm520n-AK68.sh &")
-        elseif content and string.find(content, "MT5700") then
-            io.popen("/usr/share/modem-AK68/MT5700-AK68.sh &")  
-        end
-    end
+function m.on_after_commit(self)
+    -- Run the remaining MT5700 settings only after UCI has committed.  The old
+    -- page-level cbi.apply check started this script before option writes, so
+    -- it could read the previous SIM selection and switch the modem back.
+    luci.sys.call("/usr/share/modem-AK68/MT5700-AK68.sh >/dev/null 2>&1 &")
 end
+
 return m,m2

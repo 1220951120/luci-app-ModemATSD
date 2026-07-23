@@ -43,7 +43,6 @@ cleanup() {
 
     sleep 10
     Sim_Sel=`uci -q get modem-AK68.@ndis[0].simsel`|| Sim_Sel=0
-    echo "0" >> /tmp/sim_sel_AK68
     echo "simsel: $Sim_Sel" >> /tmp/moduleInit-AK68
     echo "simsel: $Sim_Sel"
     #SIM选择
@@ -73,39 +72,12 @@ cleanup() {
     #-----------------SIM Card switch
     #attention！ims enable and autosel enable will make some card work under 4G network
 
-    case "$Sim_Sel" in
-        0)
-            printMsg "外置SIM卡"
-            atsd_tools_cli -i cpe -c 'AT^SCICHG=0,1'
-            atsd_tools_cli -i cpe -c 'AT^HVSST=1,0'
-            sleep 3
-            atsd_tools_cli -i cpe -c 'AT^HVSST=1,1'
-            echo "外置SIM卡" >> /tmp/moduleInit-AK68
-            echo "外置SIM卡切换完成"
-            echo "SIN卡UCI标识：$Sim_Sel"
-            echo 0 > /tmp/sim_sel_AK68
-        ;;
-        1)
-            printMsg "内置SIM卡"
-            atsd_tools_cli -i cpe -c 'AT^SCICHG=1,0'
-            atsd_tools_cli -i cpe -c 'AT^HVSST=1,0'
-            sleep 3
-            atsd_tools_cli -i cpe -c 'AT^HVSST=1,1'
-            echo "内置SIM卡1" >> /tmp/moduleInit-AK68
-            echo "内置SIM卡1切换完成"
-            echo "SIN卡UCI标识：$Sim_Sel"
-            echo 1 > /tmp/sim_sel_AK68
-        ;;
-        *)
-            atsd_tools_cli -i cpe -c 'AT^SCICHG=0,1'
-            atsd_tools_cli -i cpe -c 'AT^HVSST=1,0'
-            sleep 3
-            atsd_tools_cli -i cpe -c 'AT^HVSST=1,1'
-            printMsg "卡槽错误状态"
-            echo 6 > /tmp/sim_sel_AK68
-            echo "卡槽未识别" >> /tmp/moduleInit-AK68
-        ;;
-        esac
+    if /usr/bin/modem-sim-switch-AK68.sh "$Sim_Sel" >/dev/null 2>&1; then
+        printMsg "SIM 卡槽已按 UCI 配置应用：$Sim_Sel"
+    else
+        printMsg "SIM 卡槽应用失败：$Sim_Sel"
+        echo "SIM卡切换失败" >/tmp/simcardstat-AK68
+    fi
 
    #MT5700-IMEI
     if [ ${Enable_IMEI} == 1 ];then
