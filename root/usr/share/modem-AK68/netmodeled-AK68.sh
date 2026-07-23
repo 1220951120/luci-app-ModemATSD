@@ -8,18 +8,31 @@ flock -n 200 || exit 1
 while true
 do
     sleep 8
-    if ping -c 1 192.168.225.1 > /dev/null 2>&1; then
+    if ! modem_led_atsd_link_up; then
+        modem_led_write_atsd_state "AK68套件断开或未接入！"
+        echo "设备检测中..." > /tmp/devck.conf
+        # Ownership has already moved to NU313, so these writes are rejected
+        # by modem_led_set instead of disturbing the new owner.
+        modem_led_set 0 cmode5
+        modem_led_set 0 cmode4
+        modem_led_set 0 sig1
+        modem_led_set 0 sig2
+        modem_led_set 0 sig3
+        modem_led_set 1 int
+        continue
+    fi
+    if modem_led_atsd_ping 192.168.225.1 > /dev/null 2>&1; then
     	output=$(atsd_tools_cli -i cpe -c "ATI")
         if echo "$output" | grep -q "RM520"; then
-            echo "RM520N" > /tmp/modconf-AK68.conf
+            modem_led_write_atsd_state "RM520N"
         else
-            if ping -c 1 192.168.8.1 > /dev/null 2>&1; then
+            if modem_led_atsd_ping 192.168.8.1 > /dev/null 2>&1; then
                 output=$(atsd_tools_cli -i cpe -c "ATI")
                 if echo "$output" | grep -q "MT5700"; then
-                    echo "MT5700" > /tmp/modconf-AK68.conf
+                    modem_led_write_atsd_state "MT5700"
                 fi
             else
-                echo "AK68套件断开或未接入！" > /tmp/modconf-AK68.conf
+                modem_led_write_atsd_state "AK68套件断开或未接入！"
                 echo "设备检测中..." > /tmp/devck.conf
                 modem_led_set 0 cmode5
                 modem_led_set 0 cmode4
@@ -31,18 +44,18 @@ do
                 continue
             fi
         fi
-    elif ping -c 1 192.168.8.1 > /dev/null 2>&1; then
+    elif modem_led_atsd_ping 192.168.8.1 > /dev/null 2>&1; then
           output=$(atsd_tools_cli -i cpe -c "ATI")
           if echo "$output" | grep -q "MT5700"; then
-              echo "MT5700" > /tmp/modconf-AK68.conf
+              modem_led_write_atsd_state "MT5700"
           fi
-    elif ping -c 1 192.168.200.1 > /dev/null 2>&1; then
+    elif modem_led_atsd_ping 192.168.200.1 > /dev/null 2>&1; then
           output=$(atsd_tools_cli -i cpe -c "ATI")
           if echo "$output" | grep -Eiq "NU313|UNISOC|UIS"; then
-              echo "NU313" > /tmp/modconf-AK68.conf
+              modem_led_write_atsd_state "NU313"
           fi
     else
-        echo "AK68套件断开或未接入！" > /tmp/modconf-AK68.conf
+        modem_led_write_atsd_state "AK68套件断开或未接入！"
         echo "设备检测中..." > /tmp/devck.conf
         modem_led_set 0 cmode5
         modem_led_set 0 cmode4

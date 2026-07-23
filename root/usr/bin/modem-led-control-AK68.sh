@@ -3,6 +3,7 @@
 MODEM_LED_STATE_FILE="${MODEM_LED_STATE_FILE:-/tmp/modconf-AK68.conf}"
 MODEM_NU313_STATE_FILE="${MODEM_NU313_STATE_FILE:-/tmp/modconf-NU313.conf}"
 MODEM_LED_SYSFS_ROOT="${MODEM_LED_SYSFS_ROOT:-/sys/class/leds}"
+MODEM_LED_NET_SYSFS_ROOT="${MODEM_LED_NET_SYSFS_ROOT:-/sys/class/net}"
 
 # The physical LEDs are shared by the external ATSD modem and the onboard
 # NU313.  Resolve ownership before every write so manual actions, schedules
@@ -20,13 +21,69 @@ modem_led_owner_from_flags() {
 	fi
 }
 
+modem_led_atsd_device() {
+	local device
+
+	if [ -n "${MODEM_LED_ATSD_DEVICE:-}" ]; then
+		echo "$MODEM_LED_ATSD_DEVICE"
+		return 0
+	fi
+	device="$(uci -q get network.wan.device 2>/dev/null)"
+	[ -n "$device" ] || device="$(uci -q get network.wan.ifname 2>/dev/null)"
+	set -- $device
+	[ "$#" -gt 0 ] && {
+		echo "$1"
+		return 0
+	}
+	if [ -e "$MODEM_LED_NET_SYSFS_ROOT/BLUE4" ]; then
+		echo BLUE4
+		return 0
+	fi
+	return 1
+}
+
+modem_led_atsd_link_up() {
+	local device carrier
+
+	device="$(modem_led_atsd_device)" || return 0
+	carrier="$MODEM_LED_NET_SYSFS_ROOT/$device/carrier"
+	# Preserve compatibility with virtual/legacy WAN devices which do not
+	# expose a carrier file.  Where carrier is available, it is the authoritative
+	# signal that the external AK68 has physically disconnected.
+	[ -r "$carrier" ] || return 0
+	[ "$(cat "$carrier" 2>/dev/null)" = 1 ]
+}
+
+modem_led_atsd_ping() {
+	local address="$1"
+	local device
+
+	device="$(modem_led_atsd_device)" || return 1
+	# The onboard NU313 is reachable through usb0 at 192.168.200.1.  Always
+	# bind ATSD discovery to the external AK68 network device so that address
+	# can only identify an NU313 physically connected through AK68.
+	ping -I "$device" -c 1 -W 1 "$address"
+}
+
+modem_led_write_atsd_state() {
+	local new_state="$1"
+	local old_state tmp
+
+	old_state="$(cat "$MODEM_LED_STATE_FILE" 2>/dev/null)"
+	[ "$old_state" = "$new_state" ] && return 0
+	tmp="$MODEM_LED_STATE_FILE.$$"
+	(umask 022; printf '%s\n' "$new_state" > "$tmp") || return 1
+	mv -f "$tmp" "$MODEM_LED_STATE_FILE"
+}
+
 modem_led_atsd_detected() {
 	local state
 	state="$(cat "$MODEM_LED_STATE_FILE" 2>/dev/null)"
 	case "$state" in
-		*RM520N*|*MT5700*|*NU313*) return 0 ;;
+		*RM520N*|*MT5700*|*NU313*) ;;
 		*) return 1 ;;
 	esac
+	modem_led_atsd_link_up
 }
 
 modem_led_nu313_detected() {

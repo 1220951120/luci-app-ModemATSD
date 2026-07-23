@@ -63,6 +63,56 @@ class LedOwnerTests(unittest.TestCase):
             self.assertEqual(accepted.returncode, 0)
             self.assertEqual(brightness.read_text(encoding="utf-8").strip(), "0")
 
+    def test_stale_atsd_state_loses_ownership_when_wan_carrier_is_down(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "modem-state"
+            state.write_text("MT5700\n", encoding="utf-8")
+            nu313_state = root / "nu313-state"
+            nu313_state.write_text("NU313-M2\nM821CU5CHE081404784\n", encoding="utf-8")
+            carrier = root / "net/BLUE4/carrier"
+            carrier.parent.mkdir(parents=True)
+            carrier.write_text("0\n", encoding="utf-8")
+            env = os.environ.copy()
+            env.update(
+                MODEM_LED_STATE_FILE=str(state),
+                MODEM_NU313_STATE_FILE=str(nu313_state),
+                MODEM_LED_NET_SYSFS_ROOT=str(root / "net"),
+                MODEM_LED_ATSD_DEVICE="BLUE4",
+            )
+
+            disconnected = subprocess.run(
+                [str(CONTROL), "owner"], env=env, check=True, text=True, capture_output=True
+            )
+            self.assertEqual(disconnected.stdout.strip(), "nu313")
+
+            carrier.write_text("1\n", encoding="utf-8")
+            connected = subprocess.run(
+                [str(CONTROL), "owner"], env=env, check=True, text=True, capture_output=True
+            )
+            self.assertEqual(connected.stdout.strip(), "atsd")
+
+    def test_atsd_probe_is_bound_to_external_device(self):
+        control = CONTROL.read_text(encoding="utf-8")
+        function = control.index("modem_led_atsd_ping()")
+        state_writer = control.index("modem_led_write_atsd_state()", function)
+        probe = control[function:state_writer]
+        self.assertIn('device="$(modem_led_atsd_device)" || return 1', probe)
+        self.assertIn('ping -I "$device" -c 1 -W 1 "$address"', probe)
+
+    def test_detection_loops_check_carrier_and_avoid_rewriting_same_state(self):
+        control = CONTROL.read_text(encoding="utf-8")
+        netmodeled = (ROOT / "root/usr/share/modem-AK68/netmodeled-AK68.sh").read_text(encoding="utf-8")
+        devck = (ROOT / "root/usr/share/modem-AK68/devck-AK68.sh").read_text(encoding="utf-8")
+        self.assertIn("modem_led_write_atsd_state()", control)
+        self.assertIn('[ "$old_state" = "$new_state" ] && return 0', control)
+        for detector in (netmodeled, devck):
+            carrier = detector.index("if ! modem_led_atsd_link_up; then")
+            probe = detector.index("modem_led_atsd_ping 192.", carrier)
+            self.assertLess(carrier, probe)
+            self.assertNotIn("ping -c 1", detector)
+            self.assertIn('modem_led_write_atsd_state "AK68套件断开或未接入！"', detector)
+
     def test_nu313_detection_reads_verified_state_file_without_adb(self):
         control = CONTROL.read_text(encoding="utf-8")
         function = control.index("modem_led_nu313_detected()")
